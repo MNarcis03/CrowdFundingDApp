@@ -1,11 +1,22 @@
 import React, { Component } from "react";
-import { Container, Row, Button } from 'react-bootstrap/';
+import { Link } from "react-router-dom";
+import {
+  Container,
+  Row,
+  Card,
+  Alert,
+  Button,
+  Spinner
+} from 'react-bootstrap/';
 
 import ipfs from "./../../utils/ipfs";
 import getWeb3 from "./../../utils/getWeb3";
 import session from "./../../utils/session";
 
 import IpfsHashStorage from "./../../contracts/IpfsHashStorage.json";
+import CrowdFunding from "./../../contracts/CrowdFunding.json";
+import TokenCrowdsale from "./../../contracts/TokenCrowdsale.json";
+import CrowdFundingToken from "./../../contracts/CrowdFundingToken.json";
 
 import './Home.css';
 
@@ -14,62 +25,72 @@ class Home extends Component {
     super(props);
 
     this.state = {
-      username: null,
       web3: null,
       accounts: null,
-      contract: null,
-      session: session,
-      loggedIn: false
+      contracts: {
+        ipfsHashStorage: null,
+      },
+      userAccount: {
+        isLoggedIn: false,
+        username: null,
+      },
+      view: {
+        loaded: false,
+      },
     };
 
     this.userIsLoggedIn = this.userIsLoggedIn.bind(this);
-    this.userExists = this.userExists.bind(this);
+    this.userHasAccount = this.userHasAccount.bind(this);
     this.getUsername = this.getUsername.bind(this);
     this.decodeIpfsContent = this.decodeIpfsContent.bind(this);
   }
 
   componentDidMount = async () => {
     try {
-      // Get network provider and web3 instance
       const web3 = await getWeb3();
-
-      // Use web3 to get the user's accounts
       const accounts = await web3.eth.getAccounts();
-
-      // Get the contract instance
       const networkId = await web3.eth.net.getId();
-      const deployedNetwork = IpfsHashStorage.networks[networkId];
-      const contract = new web3.eth.Contract(
+
+      const ipfsHashStorage = new web3.eth.Contract(
         IpfsHashStorage.abi,
-        deployedNetwork && deployedNetwork.address,
+        IpfsHashStorage.networks[networkId] &&
+        IpfsHashStorage.networks[networkId].address,
       );
 
-      // Set web3, accounts, and contract to the state
       this.setState({
-        web3: web3,
-        accounts: accounts,
-        contract: contract
+        web3, accounts,
+        contracts: {
+          ipfsHashStorage,
+        },
       });
 
-      if (true === await this.userIsLoggedIn()) {
-        if (true === await this.getUsername()) {
-          this.setState({ loggedIn: true });
-        }
+      const isLoggedIn = await this.userIsLoggedIn();
+
+      if (true === isLoggedIn) {
+        const username = await this.getUsername();
+
+        this.setState({
+          userAccount: {
+            isLoggedIn, username,
+          }
+        });
       }
-    } catch (error) {
-      console.error(error);
+    } catch (err) {
+      console.error("Err @ ComponentDidMount():", err.message);
 
       alert (
         `Failed to load web3, accounts, contract or data from blockchain. Check console for details.`,
       );
     }
+
+    let view = this.state;
+    view.loaded = true;
+    this.setState({ view });
   }
 
   userIsLoggedIn = async () => {
-    const { session } = this.state;
-
     if (false === session.sessionExpired()) {
-      if (true === await this.userExists()) {
+      if (true === await this.userHasAccount()) {
         return true;
       }
     }
@@ -77,66 +98,153 @@ class Home extends Component {
     return false;
   }
 
-  userExists = async () => {
-    const { contract, accounts } = this.state;
-
+  userHasAccount = async () => {
     try {
-      const response = await contract.methods.accountHasIpfsHash(accounts[0]).call();
-      console.log("contract.methods.accountHasIpfsHash(): ", response);
+      const { contracts, accounts } = this.state;
+
+      const response =
+        await contracts.ipfsHashStorage.methods.accountHasIpfsHash(
+          accounts[0]
+        ).call();
 
       if (true === response) {
         return true;
       }
-    } catch (error) {
-      console.log("Err @ userExists(): ", error);
+    } catch (err) {
+      console.log("Err @ userExists():", err.message);
     }
 
     return false;
   }
 
   getUsername = async () => {
-    const { contract, accounts } = this.state;
-
     try {
-      const ipfsHash = await contract.methods.getAccountIpfsHash(accounts[0]).call();
-      console.log("contract.methods.getAccountIpfsHash(): ", ipfsHash);
+      const { contracts, accounts } = this.state;
+
+      const ipfsHash =
+        await contracts.ipfsHashStorage.methods.getAccountIpfsHash(
+          accounts[0]
+        ).call();
 
       const ipfsContent = ipfs.cat(ipfsHash);
-      console.log("ipfs.cat() Content Decoded: ", ipfsContent);
 
       const decodedContent = await this.decodeIpfsContent(ipfsContent);
-      console.log("Home: getUsername(): ", decodedContent.username)
-      this.setState({ username: decodedContent.username });
-    } catch (error) {
-      console.error("Err @ getUsername(): ", error);
-      return false;
+
+      return decodedContent.username;
+    } catch (err) {
+      console.error("Err @ getUsername():", err.message);
     }
 
-    return true;
+    return null;
   }
 
   decodeIpfsContent = async (_ipfsContent) => {
-    const decoder = new TextDecoder("utf-8");
+    try {
+      const decoder = new TextDecoder("utf-8");
 
-    let decodedContent = "";
+      let decodedContent = "";
 
-    for await (const chunk of _ipfsContent) {
-      decodedContent += decoder.decode(chunk, { stream: true });
+      for await (const chunk of _ipfsContent) {
+        decodedContent += decoder.decode(chunk, { stream: true });
+      }
+
+      decodedContent += decoder.decode();
+
+      return JSON.parse(decodedContent);
+    } catch (err) {
+      console.error("Err @ decodeIpfsContent():", err.message);
     }
 
-    decodedContent += decoder.decode();
-
-    return JSON.parse(decodedContent);
+    return null;
   }
 
   render() {
+    const { web3, accounts, contracts, userAccount, view } = this.state;
+
+    return (
+      <Container fluid="md auto" className="Crowdsale" style={{ width: "100%", height: "70%" }}>
+        <Card border="light" className="text-center" style={{ width: "100%", height: "100%" }}>
+          <Card.Body className="mt-3 mb-3" style={{ width: "100%", height: "100%" }}>
+            {
+              //if
+              (false === view.loaded) ?
+                <>
+                  <Card.Title className="display-6 mb-5">
+                    Loading Homepage...
+                  </Card.Title>
+
+                  <Spinner animation="border" role="status">
+                    <span className="visually-hidden">Loading...</span>
+                  </Spinner>
+                </>
+              //else
+              :
+                //if
+                ((null !== web3) && (null !== accounts) && (null !== contracts.ipfsHashStorage)) ?
+                  //if
+                  (true === userAccount.isLoggedIn) ?
+                    <>
+                      <Card.Title className="display-6">
+                        Welcome Back, { userAccount.username }!
+                      </Card.Title>
+                    </>
+                  //else
+                  :
+                    <>
+                      <Card.Title className="display-6">
+                        Welcome To Crowd Funding DApp!
+                      </Card.Title>
+                    </>
+                  //endif
+                //else
+                :
+                  <Row className="justify-content-md-center mt-5">
+                    <Alert variant="light" style={{ width: "50%" }}>
+                      <Alert.Heading className="mb-3">Oh snap! You got an error!</Alert.Heading>
+
+                      <p className="lead">Web3, accounts or contracts not loaded...</p>
+
+                      <hr />
+
+                      <p className="mb-3">
+                        Make sure you have MetaMask installed and your account is connected to Crowd Funding ETH.
+                      </p>
+
+                      <Link to={{ pathname: `/home` }} className="btn btn-dark">
+                        Reload Page
+                      </Link>
+                    </Alert>
+                  </Row>
+                //endif
+              //endif
+            }
+          </Card.Body>
+        </Card>
+      </Container>
+    );
+
     if (true === this.state.loggedIn) {
       return (
         <Container fluid="md auto" className="Home">
-          <Row className="justify-content-md-center">
+          <Row className="justify-content-md-center mb-3">
             <h1 className="text-center display-6">
               Welcome back to Crowd Funding DApp, { this.state.username }!
             </h1>
+          </Row>
+          <Row className="justify-content-md-center mb-3">
+            <Button href="/startProject" variant="outline-secondary" style={{ width: "32rem" }}>
+              Propose A Project To The Crowd Funding Community
+            </Button>
+          </Row>
+          <Row className="justify-content-md-center mb-3">
+            <Button href="/discoverProjects" variant="outline-dark" style={{ width: "32rem" }}>
+              Check The Latest Crowd Funding Projects
+            </Button>
+          </Row>
+          <Row className="justify-content-md-center">
+            <Button href="/crowdsale" variant="outline-secondary" style={{ width: "32rem" }}>
+              Join The Crowd Funding Token Crowdsale
+            </Button>
           </Row>
         </Container>
       );
@@ -152,7 +260,7 @@ class Home extends Component {
             Join The Dark Side
           </Button>
         </Row>
-        <Row className="justify-content-md-center mb-3">
+        <Row className="justify-content-md-center">
           <Button href="/login" variant="outline-secondary" style={{ width: "32rem" }}>
             I'm Already Part Of The Crowd Funding Community
           </Button>

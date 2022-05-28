@@ -1,6 +1,14 @@
 import React, { Component } from "react";
-import { Redirect } from "react-router-dom";
-import { Alert, Container, Row, Card, Form, Button } from "react-bootstrap";
+import { Redirect, Link } from "react-router-dom";
+import {
+  Container,
+  Row,
+  Card,
+  Alert,
+  Form,
+  Button,
+  Spinner,
+} from "react-bootstrap";
 
 import ipfs from "./../../utils/ipfs";
 import getWeb3 from "./../../utils/getWeb3";
@@ -10,15 +18,6 @@ import IpfsHashStorage from "./../../contracts/IpfsHashStorage.json";
 
 import "./Login.css";
 
-const LOGIN_ERROR_ENUM = Object.freeze({
-  "Unknown": -1,
-  "Success": 0,
-  "BlockchainError": 1,
-  "UserDoesNotExistsError": 2,
-  "Last": 3
-});
-
-// Feature: Account Recovery
 class Login extends Component {
   constructor(props) {
     super(props);
@@ -26,52 +25,85 @@ class Login extends Component {
     this.state = {
       web3: null,
       accounts: null,
-      contract: null,
-      form: {},
-      formErrors: {},
-      loginError: null,
-      redirect: false,
-      session: session
+      contracts: {
+        ipfsHashStorage: null,
+      },
+      userAccount: {
+        isLoggedIn: false,
+      },
+      view: {
+        loaded: false,
+        data: {
+          form: {
+            validated: false,
+            submitted: false,
+            failed: false,
+            input: {
+              username: null,
+              password: null,
+            },
+            errors: {
+              username: null,
+              password: null,
+            },
+            fieldEnumeration: {
+              E_USERNAME_FIELD: 0,
+              E_PASSWORD_FIELD: 1,
+            },
+          },
+        },
+      },
     };
 
     this.userIsLoggedIn = this.userIsLoggedIn.bind(this);
-    this.userExists = this.userExists.bind(this);
+    this.userHasAccount = this.userHasAccount.bind(this);
     this.setField = this.setField.bind(this);
     this.handleSubmit = this.handleSubmit.bind(this);
-    this.checkFormErrors = this.checkFormErrors.bind(this);
+    this.checkErrors = this.checkErrors.bind(this);
+    this.handleLogin = this.handleLogin.bind(this);
     this.login = this.login.bind(this);
     this.decodeIpfsContent = this.decodeIpfsContent.bind(this);
-    this.handleLoginError = this.handleLoginError.bind(this);
+    this.sleep = this.sleep.bind(this);
   }
 
   componentDidMount = async () => {
     try {
-      // Get network provider and web3 instance
       const web3 = await getWeb3();
-
-      // Use web3 to get the user's accounts
       const accounts = await web3.eth.getAccounts();
-
-      // Get the contract instance
       const networkId = await web3.eth.net.getId();
-      const deployedNetwork = IpfsHashStorage.networks[networkId];
-      const contract = new web3.eth.Contract(
+
+      const ipfsHashStorage = new web3.eth.Contract(
         IpfsHashStorage.abi,
-        deployedNetwork && deployedNetwork.address,
+        IpfsHashStorage.networks[networkId] &&
+        IpfsHashStorage.networks[networkId].address,
       );
 
-      // Set web3, accounts, and contract to the state
       this.setState({
-        web3: web3,
-        accounts: accounts,
-        contract: contract
+        web3,
+        accounts,
+        contracts: {
+          ipfsHashStorage,
+        },
       });
 
-      if (true === await this.userIsLoggedIn()) {
-        this.setState({ loggedIn: true });
-      }
-    } catch (error) {
-      console.error(error);
+      const isLoggedIn = await this.userIsLoggedIn();
+
+      let { view } = this.state;
+      view.loaded = true;
+
+      this.setState({
+        userAccount: {
+          isLoggedIn,
+        },
+        view,
+      });
+    } catch (err) {
+      let { view } = this.state;
+
+      view.loaded = true;
+      this.setState({ view });
+
+      console.error("Err @ ComponentDidMount():", err.message);
 
       alert (
         `Failed to load web3, accounts, contract or data from blockchain. Check console for details.`,
@@ -80,8 +112,6 @@ class Login extends Component {
   }
 
   userIsLoggedIn = async () => {
-    const { session } = this.state;
-
     if (false === session.sessionExpired()) {
       if (true === await this.userExists()) {
         return true;
@@ -91,227 +121,324 @@ class Login extends Component {
     return false;
   }
 
-  userExists = async () => {
-    const { contract, accounts } = this.state;
-
+  userHasAccount = async () => {
     try {
-      const response = await contract.methods.accountHasIpfsHash(accounts[0]).call();
-      console.log("contract.methods.accountHasIpfsHash(): ", response);
+      const { contracts, accounts } = this.state;
+
+      const response =
+        await contracts.ipfsHashStorage.methods.accountHasIpfsHash(
+          accounts[0]
+        ).call();
 
       if (true === response) {
         return true;
       }
-    } catch (error) {
-      console.error("Err @ userExists(): ", error);
+    } catch (err) {
+      console.error("Err @ userHasAccount():", err.message);
     }
 
     return false;
   }
 
-  setField(field, value) {
-    this.setState({ form: { ...this.state.form, [field] : value } });
+  setField(_field, _value) {
+    let { view } = this.state;
 
-    if (!!this.state.formErrors[field]) {
-      this.setState({ formErrors: { ...this.state.formErrors, [field] : null } });
+    if (view.data.form.fieldEnumeration.E_USERNAME_FIELD === _field) {
+      view.data.form.input.username = _value;
+
+      if (!!view.data.form.errors.username) {
+        view.data.form.errors.username = null;
+      }
+    } else if (view.data.form.fieldEnumeration.E_PASSWORD_FIELD === _field) {
+      view.data.form.input.password = _value;
+
+      if (!!view.data.form.errors.password) {
+        view.data.form.errors.password = null;
+      }
     }
+
+    this.setState({ view });
   }
 
-  checkFormErrors() {
-    const formErrors = {};
-    const { username, password } = this.state.form;
+  handleSubmit(_event) {
+    const form = _event.currentTarget;
 
-    if ((!username) || ("" === username)) {
-      formErrors.username = "Please enter your username.";
-    } else if (username.length > 30) {
-      formErrors.username = "Username too long."
-    }
+    if (true === form.checkValidity()) {
+      let { view } = this.state;
 
-    if ((!password) || ("" === password)) {
-      formErrors.password = "Please enter your password";
-    } else if ((password.length < 8) || (password.length > 30)) {
-      formErrors.password = "Password must be between 8 and 30 characters."
-    }
+      const errors = this.checkErrors();
 
-    return formErrors;
-  }
+      view.data.form.errors = errors;
+      this.setState({ view });
 
-  handleSubmit(event) {
-    const formErrors = this.checkFormErrors();
+      if (Object.keys(errors).length < 1) {
+        view.data.form.validated = true;
+        this.setState({ view });
 
-    if (Object.keys(formErrors).length > 0) {
-      this.setState({ formErrors: formErrors });
-    } else {
-      const form = event.currentTarget;
-
-      if (true === form.checkValidity()) {
         (async () => {
-          let loginError = LOGIN_ERROR_ENUM.UserDoesNotExistsError;
-
-          if (true === await this.userExists()) {
-            loginError = await this.login();
-
-            if (LOGIN_ERROR_ENUM.Success === loginError) {
-              const { session } = this.state;
-              session.startSession();
-            }
-          }
-
-          this.handleLoginError(loginError);
+          await this.handleLogin();
         })();
       }
     }
 
-    event.preventDefault();
-    event.stopPropagation();
+    _event.preventDefault();
+    _event.stopPropagation();
+  }
+
+  checkErrors() {
+    let errors = {};
+
+    const { username, password } = this.state.view.data.form.input;
+
+    if (null === username) {
+      errors.username = "Please fill out this field.";
+    } else if (username.length > 30) {
+      errors.username = "User Name Too Long.";
+    }
+
+    if (null === password) {
+      errors.password = "Please fill out this field.";
+    } else if ((password.length < 8) || (password.length > 30)) {
+      errors.password = "Password Must Have Between 8-30 Characters."
+    }
+
+    return errors;
+  }
+
+  handleLogin = async () => {
+    let { userAccount, view } = this.state;
+
+    const response = await this.login();
+    await this.sleep(2000);
+
+    if (true === response) {
+      view.data.form.submitted = true;
+      userAccount.isLoggedIn = true;
+
+      session.startSession();
+    } else {
+      view.data.form.validated = false;
+      view.data.form.failed = true;
+    }
+
+    this.setState({ userAccount, view });
   }
 
   login = async () => {
-    let loginError = LOGIN_ERROR_ENUM.UserDoesNotExistsError;
-
-    const { contract, accounts } = this.state;
-    const { username, password } = this.state.form;
-
     try {
-      const ipfsHash = await contract.methods.getAccountIpfsHash(accounts[0]).call();
-      console.log("contract.methods.getUserDataIpfsHash(): ", ipfsHash);
+      const { accounts, contracts } = this.state;
+      const { username, password } = this.state.view.data.form.input;
+
+      const ipfsHash =
+        await contracts.ipfsHashStorage.methods.getAccountIpfsHash(
+          accounts[0]
+        ).call();
 
       const ipfsContent = ipfs.cat(ipfsHash);
 
       const decodedIpfsContent = await this.decodeIpfsContent(ipfsContent);
 
-      if ((username === decodedIpfsContent.username) && (password === decodedIpfsContent.password)) {
-        loginError = LOGIN_ERROR_ENUM.Success;
+      if (
+        (null !== decodedIpfsContent) &&
+        (username === decodedIpfsContent.username) &&
+        (password === decodedIpfsContent.password)
+      ) {
+        return true;
       }
-    } catch (error) {
-      console.error("Err @ login(): ", error);
-      loginError = LOGIN_ERROR_ENUM.BlockchainError;
+    } catch (err) {
+      console.error("Err @ login():", err.message);
     }
 
-    return loginError;
+    return false;
   }
 
   decodeIpfsContent = async (_ipfsContent) => {
-    const decoder = new TextDecoder("utf-8");
+    try {
+      const decoder = new TextDecoder("utf-8");
 
-    let decodedContent = "";
+      let decodedContent = "";
 
-    for await (const chunk of _ipfsContent) {
-      decodedContent += decoder.decode(chunk, { stream: true });
+      for await (const chunk of _ipfsContent) {
+        decodedContent += decoder.decode(chunk, { stream: true });
+      }
+
+      decodedContent += decoder.decode();
+
+      return JSON.parse(decodedContent);
+    } catch (err) {
+      console.error("Err @ decodeIpfsContent():", err.message);
     }
 
-    decodedContent += decoder.decode();
-
-    return JSON.parse(decodedContent);
+    return null;
   }
 
-  handleLoginError(_loginError) {
-    if (LOGIN_ERROR_ENUM.Success === _loginError) {
-      this.setState({
-        loginError: null,
-        loggedIn: true
-      });
-    } else if (LOGIN_ERROR_ENUM.BlockchainError === _loginError) {
-      this.setState({
-        loginError: "Oh snap! Error occurred on Blockchain... Please try again later!"
-      });
-    } else if (LOGIN_ERROR_ENUM.UserDoesNotExistsError === _loginError) {
-      this.setState({
-        loginError: "Username or password is incorrect... Please make sure both username and password are correct!"
-      });
-    }
+  sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 
   render() {
-    if (true === this.state.loggedIn) {
-      return (
-        <Redirect to="/"/>
-      );
-    }
-
-    if (!this.state.web3 || !this.state.accounts || !this.state.contract) {
-      return (
-        <Container fluid="md" className="Login mt-5" style={{ height: "24rem" }}>
-          <Row className="text-center justify-content-md-center">
-            <Alert variant="light" style={{ width: "32rem" }}>
-              <Alert.Heading>Oh snap! You got an error!</Alert.Heading>
-              <p className="lead">Web3, accounts or contract not loaded...</p>
-
-              <hr />
-
-              <p className="mb-0">
-                Make sure you have MetaMask installed and your account is connected to Crowd Funding ETH.
-              </p>
-            </Alert>
-          </Row>
-        </Container>
-      );
-    }
+    const { web3, accounts, contracts, userAccount, view } = this.state;
 
     return (
-      <Container fluid="md" className="Login">
-        <Row className="justify-content-md-center">
-          <Card className="text-center" style={{ width: "64rem" }}>
-            <Card.Body className="mt-3 mb-3">
-              <Card.Title className="display-6">Welcome Back!</Card.Title>
+      <Container fluid="md auto" className="Crowdsale" style={{ width: "100%", height: "70%" }}>
+        <Card border="light" className="text-center" style={{ width: "100%", height: "100%" }}>
+          <Card.Body className="mt-3 mb-3" style={{ width: "100%", height: "100%" }}>
+            {
+              //if
+              (false === view.loaded) ?
+                <>
+                  <Card.Title className="display-6 mb-5">
+                    Loading Login...
+                  </Card.Title>
 
-              <Card.Text className="lead" style={{ color: "red" }}>
-                { this.state.loginError }
-              </Card.Text>
+                  <Spinner animation="border" role="status">
+                    <span className="visually-hidden">Loading...</span>
+                  </Spinner>
+                </>
+              //else
+              :
+                //if
+                ((null !== web3) && (null !== accounts) && (null !== contracts.ipfsHashStorage)) ?
+                  //if
+                  (false === userAccount.isLoggedIn) ?
+                    <>
+                      <Card.Title className="display-6 mb-5">
+                        Login
+                      </Card.Title>
 
-              <br />
+                      {
+                        //if
+                        (true === view.data.form.failed) ?
+                          <Card.Text className="lead mb-3" style={{ color: "red" }}>
+                            Login Failed: Invalid Username OR Password!
+                          </Card.Text>
+                        //else
+                        : <></>
+                        //endif
+                      }
 
-              <Row className="justify-content-md-center">
-                <Form style={{ width: "32rem" }}>
-                  <Form.Group controlId="formBasicUsername">
-                    <Form.Label className="lead">Username</Form.Label>
+                      <Row className="justify-content-md-center">
+                        <Form
+                          validated={ view.data.form.validated }
+                          onSubmit={ this.handleSubmit }
+                          style={{ width: "50%" }}
+                        >
+                          <Form.Group controlId="formAccountAddress">
+                            <Form.Label className="lead">Account Address</Form.Label>
 
-                    <Form.Control
-                      required
-                      type="text"
-                      placeholder="Enter Username"
-                      onChange={ e => this.setField("username", e.target.value) }
-                      isInvalid={ !!this.state.formErrors.username }
-                    />
+                            <Form.Control
+                              type="text"
+                              placeholder={ `${ accounts[0] }` }
+                              aria-label="Disabled Account Address"
+                              readOnly
+                            />
+                          </Form.Group>
 
-                    <Form.Control.Feedback type="invalid">
-                      { this.state.formErrors.username }
-                    </Form.Control.Feedback>
-                  </Form.Group>
+                          <Form.Group controlId="formAccountUsername">
+                            <Form.Label className="lead">Account User Name</Form.Label>
 
-                  <Form.Group controlId="formBasicPassword">
-                    <Form.Label className="lead">Password</Form.Label>
+                            <Form.Control
+                              required
+                              type="text"
+                              placeholder="Enter User Name"
+                              onChange={
+                                e => this.setField(
+                                  view.data.form.fieldEnumeration.E_USERNAME_FIELD,
+                                  e.target.value
+                                )
+                              }
+                              isInvalid={ !!view.data.form.errors.username }
+                            />
 
-                    <Form.Control
-                      required
-                      type="password"
-                      placeholder="Enter Password"
-                      onChange={ e => this.setField("password", e.target.value) }
-                      isInvalid={ !!this.state.formErrors.password }
-                    />
+                            {
+                              //if
+                              (false === view.data.form.validated) ?
+                                <Form.Control.Feedback type="invalid">
+                                  { view.data.form.errors.username }
+                                </Form.Control.Feedback>
+                              //else
+                              : <Form.Control.Feedback>Looks good!</Form.Control.Feedback>
+                              //endif
+                            }
+                          </Form.Group>
 
-                    <Form.Control.Feedback type="invalid">
-                      { this.state.formErrors.password }
-                    </Form.Control.Feedback>
-                  </Form.Group>
+                          <Form.Group controlId="formAccountPassword">
+                            <Form.Label className="lead">Account Password</Form.Label>
 
-                  <Form.Group controlId="formBasicCheckbox">
-                    <Form.Check type="checkbox" label="Remember me!" />
-                  </Form.Group>
+                            <Form.Control
+                              required
+                              type="password"
+                              placeholder="Enter Password"
+                              onChange={
+                                e => this.setField(
+                                  view.data.form.fieldEnumeration.E_PASSWORD_FIELD,
+                                  e.target.value
+                                )
+                              }
+                              isInvalid={ !!view.data.form.errors.password }
+                            />
 
-                  <Button variant="dark" type="submit" onClick={ this.handleSubmit }>
-                    Login
-                  </Button>
-                </Form>
-              </Row>
+                            {
+                              //if
+                              (false === view.data.form.validated) ?
+                                <Form.Control.Feedback type="invalid">
+                                  { view.data.form.errors.password }
+                                </Form.Control.Feedback>
+                              //else
+                              : <Form.Control.Feedback>Looks good!</Form.Control.Feedback>
+                              //endif
+                            }
+                          </Form.Group>
 
-              <br />
+                          {
+                            //if
+                            (true === view.data.form.validated) ?
+                              <Spinner animation="border" role="status">
+                                <span className="visually-hidden">Loading...</span>
+                              </Spinner>
+                            //else
+                            :
+                              <Button variant="outline-secondary" type="submit" className="mt-3">
+                                Login
+                              </Button>
+                            //endif
+                          }
+                        </Form>
+                      </Row>
 
-              <Card.Text>
-                <a href="/register" className="text-muted" style={{ color: "black" }}>Don't have an account?</a>
-              </Card.Text>
-            </Card.Body>
-          </Card>
-        </Row>
+                      <Card.Text className="mt-3">
+                        <a href="/register" className="text-muted" style={{ color: "black" }}>
+                          Don't have an account?
+                        </a>
+                      </Card.Text>
+                    </>
+                  //else
+                  : <Redirect to="/home" />
+                  //endif
+                //else
+                :
+                  <Row className="justify-content-md-center mt-5">
+                    <Alert variant="light" style={{ width: "50%" }}>
+                      <Alert.Heading className="mb-3">Oh snap! You got an error!</Alert.Heading>
+
+                      <p className="lead">Web3, accounts or contracts not loaded...</p>
+
+                      <hr />
+
+                      <p className="mb-3">
+                        Make sure you have MetaMask installed and your account is connected to Crowd Funding ETH.
+                      </p>
+
+                      <Link to={{ pathname: `/login` }} className="btn btn-dark">
+                        Reload Page
+                      </Link>
+                    </Alert>
+                  </Row>
+                //endif
+              //endif
+            }
+          </Card.Body>
+        </Card>
       </Container>
     );
   }

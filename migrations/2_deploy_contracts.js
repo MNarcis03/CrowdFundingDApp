@@ -4,7 +4,7 @@ const CrowdFunding = artifacts.require("./CrowdFunding.sol");
 const IpfsHastStorage = artifacts.require("./IpfsHashStorage.sol");
 
 module.exports = async (deployer, network, [owner]) => {
-  await deployer.deploy(CrowdFundingToken, "Crowd Funding Token", "CFT", 18, 10000);
+  await deployer.deploy(CrowdFundingToken, "Crowd Funding Token", "CFT", 3, 100000);
   const crowdFundingToken = await CrowdFundingToken.deployed();
 
   await deployer.deploy(TokenCrowdsale, 2, owner, crowdFundingToken.address);

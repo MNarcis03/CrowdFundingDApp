@@ -1,22 +1,24 @@
 import React, { Component } from "react";
-import { Redirect } from "react-router-dom";
-import { Alert, Container, Row, Card, Form, Button, InputGroup, FormControl } from "react-bootstrap";
+import { Redirect, Link } from "react-router-dom";
+import {
+  Container, Row,
+  Alert,
+  Card,
+  Form, FormControl,
+  InputGroup,
+  Button,
+  Spinner
+} from "react-bootstrap";
 
 import getWeb3 from "./../../utils/getWeb3";
 import session from "./../../utils/session";
 
 import IpfsHashStorage from "./../../contracts/IpfsHashStorage.json";
 import CrowdFunding from "./../../contracts/CrowdFunding.json";
+import TokenCrowdsale from "./../../contracts/TokenCrowdsale.json";
+import CrowdFundingToken from "./../../contracts/CrowdFundingToken.json";
 
 import "./StartProject.css";
-
-const START_PROJECT_ERROR_ENUM = Object.freeze({
-  "Unknown": -1,
-  "Success": 0,
-  "BlockchainError": 1,
-  "ProjectNameAlreadyExists": 2,
-  "Last": 3
-});
 
 class StartProject extends Component {
   constructor(props) {
@@ -25,68 +27,122 @@ class StartProject extends Component {
     this.state = {
       web3: null,
       accounts: null,
-      crowdFunding: null,
-      ipfsHashStorage: null,
-      form: {
-        projectName: "", 
-        projectGoal: 1 
+      contracts: {
+        ipfsHashStorage: null,
+        crowdFunding: null,
+        crowdsale: null,
+        token: null,
       },
-      formErrors: {},
-      validated: false,
-      startProjectError: null,
-      redirect: false,
-      session: session,
-      loggedIn: false
+      token: {
+        symbol: "",
+        decimals: 0,
+        accountBalance: 0,
+      },
+      userAccount: {
+        isLoggedIn: false,
+      },
+      view: {
+        loaded: false,
+        data: {
+          form: {
+            validated: false,
+            submitted: false,
+            failed: false,
+            input: {
+              title: "",
+              category: "None",
+              goal: 0,
+              description: "",
+            },
+            errors: {
+              title: null,
+              category: null,
+              goal: null,
+              description: null,
+            },
+            fieldEnumeration: {
+              TITLE: 0,
+              CATEGORY: 1,
+              GOAL: 2,
+              DESCRIPTION: 3,
+            },
+          },
+        },
+      },
     };
 
     this.userIsLoggedIn = this.userIsLoggedIn.bind(this);
-    this.userExists = this.userExists.bind(this);
+    this.userHasAccount = this.userHasAccount.bind(this);
     this.setField = this.setField.bind(this);
-    this.changeProjectGoal = this.changeProjectGoal.bind(this);
     this.handleSubmit = this.handleSubmit.bind(this);
-    this.checkFormErrors = this.checkFormErrors.bind(this);
-    this.projectExists = this.projectExists.bind(this);
+    this.checkErrors = this.checkErrors.bind(this);
     this.startProject = this.startProject.bind(this);
-    this.handleStartProjectError = this.handleStartProjectError.bind(this);
+    this.sleep = this.sleep.bind(this);
   }
 
   componentDidMount = async () => {
     try {
-      // Get network provider and web3 instance
       const web3 = await getWeb3();
-
-      // Use web3 to get the user's accounts
       const accounts = await web3.eth.getAccounts();
+      const networkId = await web3.eth.net.getId();
 
-      // Get the CrowdFunding contract instance
-      let networkId = await web3.eth.net.getId();
-      let deployedNetwork = CrowdFunding.networks[networkId];
       const crowdFunding = new web3.eth.Contract(
         CrowdFunding.abi,
-        deployedNetwork && deployedNetwork.address,
+        CrowdFunding.networks[networkId] && CrowdFunding.networks[networkId].address,
       );
 
-      // Get the IpfsHashStorage contract instance
-      networkId = await web3.eth.net.getId();
-      deployedNetwork = IpfsHashStorage.networks[networkId];
       const ipfsHashStorage = new web3.eth.Contract(
         IpfsHashStorage.abi,
-        deployedNetwork && deployedNetwork.address,
+        IpfsHashStorage.networks[networkId] && IpfsHashStorage.networks[networkId].address,
       );
 
-      // Set web3, accounts, and contract to the state
+      const crowdsale = new web3.eth.Contract(
+        TokenCrowdsale.abi,
+        TokenCrowdsale.networks[networkId] && TokenCrowdsale.networks[networkId].address,
+      );
+
+      const crowdsaleToken = await crowdsale.methods.token().call();
+
+      const token = new web3.eth.Contract(
+        CrowdFundingToken.abi, crowdsaleToken
+      );
+
+      const symbol = await token.methods.symbol().call();
+      const decimals = await token.methods.decimals().call();
+      const accountBalance = await token.methods.balanceOf(accounts[0]).call();
+
       this.setState({
         web3,
         accounts,
-        crowdFunding,
-        ipfsHashStorage
+        contracts: {
+          crowdFunding, ipfsHashStorage,
+          crowdsale, token,
+        },
+        token: {
+          symbol,
+          decimals: 10 ** decimals,
+          accountBalance,
+        },
       });
 
-      if (true === await this.userIsLoggedIn()) {
-        this.setState({ loggedIn: true });
-      }
-    } catch (error) {
-      console.error(error);
+      const isLoggedIn = await this.userIsLoggedIn();
+
+      let { view } = this.state;
+      view.loaded = true;
+
+      this.setState({
+        userAccount: {
+          isLoggedIn,
+        },
+        view,
+      });
+    } catch (err) {
+      let { view } = this.state;
+
+      view.loaded = true;
+      this.setState({ view });
+
+      console.error("Err @ ComponentDidMount():", err.message);
 
       alert (
         `Failed to load web3, accounts, contract or data from blockchain. Check console for details.`,
@@ -95,10 +151,8 @@ class StartProject extends Component {
   }
 
   userIsLoggedIn = async () => {
-    const { session } = this.state;
-
     if (false === session.sessionExpired()) {
-      if (true === await this.userExists()) {
+      if (true === await this.userHasAccount()) {
         return true;
       }
     }
@@ -106,58 +160,75 @@ class StartProject extends Component {
     return false;
   }
 
-  userExists = async () => {
-    const { ipfsHashStorage, accounts } = this.state;
-
+  userHasAccount = async () => {
     try {
-      const response = await ipfsHashStorage.methods.accountHasIpfsHash(accounts[0]).call();
-      console.log("ipfsHashStorage.methods.accountHasIpfsHash(): ", response);
+      const { contracts, accounts } = this.state;
+
+      const response = await contracts.ipfsHashStorage.methods.accountHasIpfsHash(accounts[0]).call();
 
       if (true === response) {
         return true;
       }
-    } catch (error) {
-      console.error("Err @ userExists(): ", error);
+    } catch (err) {
+      console.error("Err @ userHasAccount():", err.message);
     }
 
     return false;
   }
 
   setField(field, value) {
-    this.setState({ form: { ...this.state.form, [field] : value } });
+    const { view } = this.state;
 
-    console.log("setField(): value: ", value);
+    if (view.data.form.fieldEnumeration.TITLE === field) {
+      view.data.form.input.title = value;
 
-    if (!!this.state.formErrors[field]) {
-      this.setState({ formErrors: { ...this.state.formErrors, [field] : null } });
+      if (!!view.data.form.errors.title) {
+        view.data.form.errors.title = null;
+      }
+    } else if (view.data.form.fieldEnumeration.CATEGORY === field) {
+        view.data.form.input.category = value;
+
+        if (!!view.data.form.errors.category) {
+          view.data.form.errors.category = null;
+        }
+    } else if (view.data.form.fieldEnumeration.GOAL === field) {
+      if (value > 0) {
+        view.data.form.input.goal = value;
+      } else {
+        view.data.form.input.goal = 0;
+      }
+
+      if (!!view.data.form.errors.goal) {
+        view.data.form.errors.goal = null;
+      }  
+    } else if (view.data.form.fieldEnumeration.DESCRIPTION === field) {
+      view.data.form.input.description = value;
+
+      if (!!view.data.form.errors.description) {
+        view.data.form.errors.description = null;
+      }
     }
-
-    console.log("setField(): this.state.form.projectName: ", this.state.form.projectName);
-  }
-
-  changeProjectGoal(value) {
-    const FIELD = "projectGoal";
-
-    if (value > 1) {
-      this.setState({ form: { ...this.state.form, [FIELD] : value } });
-    } else {
-      this.setState({ form: { ...this.state.form, [FIELD] : 1 } });
-    }
+ 
+    this.setState({ view });
   }
 
   handleSubmit(event) {
-    const formErrors = this.checkFormErrors();
+    const form = event.currentTarget;
 
-    if (Object.keys(formErrors).length > 0) {
-      this.setState({ formErrors: formErrors });
-    } else {
-      const form = event.currentTarget;
+    if (true === form.checkValidity()) {
+      let { view } = this.state;
 
-      if (true === form.checkValidity()) {
+      const errors = this.checkErrors();
+
+      view.data.form.errors = errors;
+      this.setState({ view });
+
+      if (Object.keys(errors).length < 1) {
+        view.data.form.validated = true;
+        this.setState({ view });
+
         (async () => {
-          let startProjectError = await this.startProject();
-
-          this.handleStartProjectError(startProjectError);
+          await this.handleStartProject();
         })();
       }
     }
@@ -166,252 +237,314 @@ class StartProject extends Component {
     event.stopPropagation();
   }
 
-  checkFormErrors() {
-    const formErrors = {};
-    const { projectName } = this.state.form;
+  checkErrors() {
+    let errors  = {};
 
-    console.log("checkFormErrors(): this.state.form.projectName: ", projectName);
+    const { title, category, goal, description } = this.state.view.data.form.input;
 
-    if ((!projectName) || ("" === projectName)) {
-      formErrors.projectName = "Please choose a name for your project.";
-    } else if ((projectName < 8) || (projectName > 30)) {
-      formErrors.projectName = "Project's name must be between 8 and 30 characters..";
+    if ((!title) || ("" === title)) {
+      errors.title = "Please choose a title for your project.";
+    } else if ((title < 8) || (title > 30)) {
+      errors.title = "Project's title must have between 8 and 30 characters.";
     }
 
-    return formErrors;
+    if ("None" === category) {
+      errors.category = "Please choose a category for your project.";
+    }
+
+    if (0 === goal) {
+      errors.goal = "Please choose a goal for your project.";
+    }
+
+    if ((!description) || ("" === description)) {
+      errors.description = "Please write a description for your project.";
+    } else if ((title < 10) || (title > 30)) {
+      errors.description = "Project's description must have between 100 and 300 characters.";
+    }
+
+    return errors;
   }
 
-  projectExists = async () => {
-    const { crowdFunding } = this.state;
-    const { projectName } = this.state.form;
-    let startProjectError = START_PROJECT_ERROR_ENUM.Success;
+  handleStartProject = async () => {
+    let { view } = this.state;
 
-    try {
-      const response = await crowdFunding.methods.projectExists(projectName);
+    const response = await this.startProject();
+    await this.sleep(2000);
 
-      if (true === response) {
-        console.log("projectExists");
-        startProjectError = START_PROJECT_ERROR_ENUM.ProjectNameAlreadyExists;
-      }
-    } catch (error) {
-      console.error("Err @ projectExists(): ", error);
-      startProjectError = START_PROJECT_ERROR_ENUM.BlockchainError;
+    if (true === response) {
+      view.data.form.submitted = true;
+    } else {
+      view.data.form.validated = false;
+      view.data.form.failed = true;
     }
 
-    return startProjectError;
+    this.setState({ view });
   }
 
   startProject = async () => {
-    const { crowdFunding, accounts } = this.state;
-    const { projectName, projectGoal } = this.state.form;
-    let startProjectError = START_PROJECT_ERROR_ENUM.Success;
-
     try {
-      await crowdFunding.methods.create(projectName, projectGoal).send({ from: accounts[0] });
-    } catch (error) {
-      console.error("Err @ startProject(): ", error);
-      startProjectError = START_PROJECT_ERROR_ENUM.BlockchainError;
+      const { contracts, accounts, token } = this.state;
+      const { input } = this.state.view.data.form;
+
+      await contracts.crowdFunding.methods.create(
+        input.title,
+        input.goal * token.decimals
+      ).send({ from: accounts[0] });
+    } catch (err) {
+      console.error("Err @ startProject():", err.message);
+      return false;
     }
 
-    return startProjectError;
+    return true;
   }
 
-  handleStartProjectError(_startProjectError) {
-    if (START_PROJECT_ERROR_ENUM.Success === _startProjectError) {
-      this.setState({
-        startProjectError: null,
-        validated: true,
-        redirect: true
-      });
-    } else if (START_PROJECT_ERROR_ENUM.BlockchainError === _startProjectError) {
-      this.setState({
-        startProjectError: "Oh snap! Error occurred on Blockchain... Please try again later!"
-      });
-    } else if (START_PROJECT_ERROR_ENUM.ProjectNameAlreadyExists === _startProjectError) {
-      this.setState({
-        startProjectError: "This project's name is already used... Please choose another!"
-      });
-    }
+  sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 
   render() {
-    if (true === this.state.redirect) {
-      return <Redirect to="/" />
-    }
-
-    if (!this.state.web3 || !this.state.accounts) {
-      return (
-        <Container fluid="md" className="Register mt-5" style={{ height: "24rem" }}>
-          <Row className="text-center justify-content-md-center">
-            <Alert variant="light" style={{ width: "32rem" }}>
-              <Alert.Heading>Oh snap! You got an error!</Alert.Heading>
-              <p className="lead">Web3, accounts or contract not loaded...</p>
-
-              <hr />
-
-              <p className="mb-0">
-                Make sure you have MetaMask installed and your account is connected to Crowd Funding ETH.
-              </p>
-            </Alert>
-          </Row>
-        </Container>
-      );
-    }
-
-    console.log(this.state.loggedIn);
-    if (true === this.state.loggedIn) {
-      return (
-        <Container fluid="md" className="StartProject">
-          <Row className="justify-content-md-center">
-            <Card className="text-center" style={{ width: "64rem" }}>
-              <Card.Body className="mt-3 mb-3">
-                <Card.Title className="display-6">Start Crowd Funding Project</Card.Title>
-
-                <Card.Text className="lead">
-                  In just few steps you can propose a crowd funding project to our community!
-                </Card.Text>
-
-                <Card.Text className="lead" style={{ color: "red" }}>
-                  { this.state.startProjectError }
-                </Card.Text>
-
-                <br />
-
-                <Row className="justify-content-md-center">
-                  <Form validated={ this.state.validated } style={{ width: "32rem" }}>
-                    <Form.Group controlId="formProjectName">
-                      <Form.Label className="lead">Choose Project's Name</Form.Label>
-
-                      <Form.Control
-                        required
-                        type="text"
-                        placeholder="Enter Project's Name"
-                        onChange={ e => this.setField("projectName", e.target.value) }
-                        isInvalid={ !!this.state.formErrors.projectName }
-                      />
-
-                      <Form.Control.Feedback type="invalid">
-                        { this.state.formErrors.projectName }
-                      </Form.Control.Feedback>
-                    </Form.Group>
-
-                    <Form.Group controlId="formProjectGoal">
-                      <Form.Label className="lead">Choose Project's CFT Goal</Form.Label>
-
-                      <InputGroup>
-                        <FormControl
-                          required
-                          type="number"
-                          value={ this.state.form.projectGoal }
-                          min="1"
-                          placeholder={ `Enter Project's CFT Goal` }
-                          onChange={ e => this.changeProjectGoal(e.target.value) }
-                        />
-                      </InputGroup>
-                    </Form.Group>
-
-                    <Form.Group controlId="formProjectTermsConditions" className="mt-3">
-                      <Form.Check
-                        required
-                        type="checkbox"
-                        label="Agree to terms and conditions."
-                        feedback="You must agree before submitting."
-                      />
-                    </Form.Group>
-
-                    <Button variant="dark" type="submit" onClick={ this.handleSubmit }>
-                      Create Project
-                    </Button>
-                  </Form>
-                </Row>
-              </Card.Body>
-            </Card>
-          </Row>
-        </Container>
-      );
-    }
+    const { web3, accounts, contracts, token, userAccount, view } = this.state;
 
     return (
-      <Container fluid="md" className="StartProject">
-        <Row className="justify-content-md-center">
-          <Card className="text-center" style={{ width: "80rem" }}>
-            <Card.Body className="mt-3 mb-3">
-              <Card.Title className="display-6">Start Crowd Funding Project</Card.Title>
+      <Container fluid="md auto" className="StartProject" style={{ width: "100%", height: "80%" }}>
+        <Card border="light" className="text-center" style={{ width: "100%", height: "100%" }}>
+          <Card.Body className="mt-3 mb-3" style={{ width: "100%", height: "100%" }}>
+            {
+              //if
+              (false === view.loaded) ?
+                <>
+                  <Card.Title className="display-6 mb-5">
+                    Loading Raise Funding Form...
+                  </Card.Title>
 
-              <Card.Text className="lead">
-                In just few steps you can propose a crowd funding project to our community!
-              </Card.Text>
+                  <Spinner animation="border" role="status">
+                    <span className="visually-hidden">Loading...</span>
+                  </Spinner>
+                </>
+              //else
+              :
+                //if
+                (
+                  (null !== web3) && (null !== accounts) &&
+                  (null !== contracts.crowdFunding) && (null !== contracts.token) &&
+                  (null !== contracts.crowdsale) && (null !== contracts.ipfsHashStorage)
+                ) ?
+                  //if
+                  (true === userAccount.isLoggedIn) ?
+                    //if
+                    (false === view.data.form.submitted) ?
+                    <>
+                      <Card.Title className="display-6 mb-3">
+                        Raise Funding
+                      </Card.Title>
 
-              <Card.Text className="lead" style={{ color: "red" }}>
-                { this.state.startProjectError }
-              </Card.Text>
+                      <Card.Text className="text-muted mb-3">
+                        Complete the following formular to be able to propose your crowd funding project into our platform.
+                      </Card.Text>
 
-              <br />
+                      {
+                        //if
+                        (true === view.data.form.failed) ?
+                          <Card.Text className="lead mb-3" style={{ color: "red" }}>
+                            Request failed due to blockchain error! Please retry later...
+                          </Card.Text>
+                        //else
+                        : <></>
+                        //endif
+                      }
 
-              <Row className="justify-content-md-center">
-                <Form validated={ this.state.validated } style={{ width: "32rem" }}>
-                  <Form.Group controlId="formProjectName">
-                    <Form.Label className="lead">Choose Project's Name</Form.Label>
+                      <Row className="justify-content-md-center">
+                        <Form
+                          validated={ view.data.form.validated }
+                          onSubmit={ this.handleSubmit }
+                          style={{ width: "50%" }}
+                        >
+                          <Form.Group controlId="formProjectTitle">
+                            <Form.Label className="lead">Title</Form.Label>
 
-                    <Form.Control
-                      required
-                      type="text"
-                      placeholder="Enter Project's Name"
-                      onChange={ e => this.setField("projectName", e.target.value) }
-                      isInvalid={ !!this.state.formErrors.projectName }
-                      disabled
-                      readOnly
-                    />
+                            <Form.Control
+                              required
+                              type="text"
+                              placeholder="Project Title"
+                              onChange={
+                                e => this.setField(
+                                  view.data.form.fieldEnumeration.TITLE,
+                                  e.target.value
+                                )
+                              }
+                              isInvalid={ !!view.data.form.errors.title }
+                            />
 
-                    <Form.Control.Feedback type="invalid">
-                      { this.state.formErrors.projectName }
-                    </Form.Control.Feedback>
-                  </Form.Group>
+                            {
+                              //if
+                              (false === view.data.form.validated) ?
+                                <Form.Control.Feedback type="invalid">
+                                  { view.data.form.errors.title }
+                                </Form.Control.Feedback>
+                              //else
+                              : <Form.Control.Feedback>Looks good!</Form.Control.Feedback>
+                              //endif
+                            }
+                          </Form.Group>
 
-                  <Form.Group controlId="formProjectGoal">
-                    <Form.Label className="lead">Choose Project's CFT Goal</Form.Label>
+                          <Form.Group controlId="formProjectCategory">
+                            <Form.Label className="lead">Category</Form.Label>
 
-                    <InputGroup>
-                      <FormControl
-                        required
-                        type="number"
-                        value={ this.state.form.projectGoal }
-                        min="1"
-                        placeholder={ `Enter Project's CFT Goal` }
-                        onChange={ e => this.changeProjectGoal(e.target.value) }
-                        disabled
-                        readOnly
-                      />
-                    </InputGroup>
-                  </Form.Group>
+                            <Form.Control
+                              required
+                              as="select"
+                              onChange={
+                                e => this.setField(
+                                  view.data.form.fieldEnumeration.CATEGORY,
+                                  e.target.value
+                                )
+                              }
+                              isInvalid={ !!view.data.form.errors.category }
+                            >
+                              <option value="None">Project Category</option>
+                              <option value="Crypto">Crypto</option>
+                              <option value="Gaming">Gaming</option>
+                              <option value="Green Future">Green Future</option>
+                              <option value="Science">Science</option>
+                            </Form.Control>
 
-                  <Form.Group controlId="formProjectTermsConditions" className="mt-3">
-                    <Form.Check
-                      required
-                      type="checkbox"
-                      label="Agree to terms and conditions."
-                      feedback="You must agree before submitting."
-                      disabled
-                    />
-                  </Form.Group>
+                            {
+                              //if
+                              (false === view.data.form.validated) ?
+                                <Form.Control.Feedback type="invalid">
+                                  { view.data.form.errors.category }
+                                </Form.Control.Feedback>
+                              //else
+                              : <Form.Control.Feedback>Looks good!</Form.Control.Feedback>
+                              //endif
+                            }
+                          </Form.Group>
 
-                  <Button variant="dark" type="submit" onClick={ this.handleSubmit } disabled>
-                    Create Project
-                  </Button>
-                </Form>
-              </Row>
+                          <Form.Group controlId="formProjectGoal">
+                            <Form.Label className="lead">{ token.symbol } Goal</Form.Label>
 
-              <Card.Text className="lead mt-3 mb-3">
-                Only Crowd Funding DApp members are allowed to create projects.
-              </Card.Text>
+                            <InputGroup>
+                              <FormControl
+                                required
+                                type="number"
+                                placeholder={ `Project ${ token.symbol } Goal` }
+                                onChange={
+                                  e => this.setField(
+                                    view.data.form.fieldEnumeration.GOAL,
+                                    e.target.value
+                                  )
+                                }
+                                isInvalid={ !!view.data.form.errors.goal }
+                                value={ view.data.form.input.goal }
+                                min="0"
+                              />
 
-              <Row className="d-inline">
-                <a href="/register" className="text-muted" style={{ color: "black" }}>Become Member NOW!</a>
-                <a href="/login" className="text-muted" style={{ color: "black" }}>Already Member?</a>
-              </Row>
-            </Card.Body>
-          </Card>
-        </Row>
+                              <InputGroup.Text>{ token.symbol }</InputGroup.Text>
+                            </InputGroup>
+
+                            {
+                              //if
+                              (false === view.data.form.validated) ?
+                                <Form.Control.Feedback type="invalid">
+                                  { view.data.form.errors.goal }
+                                </Form.Control.Feedback>
+                              //else
+                              : <Form.Control.Feedback>Looks good!</Form.Control.Feedback>
+                              //endif
+                            }
+                          </Form.Group>
+
+                          <Form.Group controlId="formProjectDescription">
+                            <Form.Label className="lead">Campaign Description</Form.Label>
+
+                            <Form.Control
+                              required
+                              as="textarea"
+                              placeholder="Project Campaign Description..."
+                              onChange={
+                                e => this.setField(
+                                  view.data.form.fieldEnumeration.DESCRIPTION,
+                                  e.target.value
+                                )
+                              }
+                              isInvalid={ !!view.data.form.errors.description }
+                            />
+
+                            {
+                              //if
+                              (false === view.data.form.validated) ?
+                                <Form.Control.Feedback type="invalid">
+                                  { view.data.form.errors.description }
+                                </Form.Control.Feedback>
+                              //else
+                              : <Form.Control.Feedback>Looks good!</Form.Control.Feedback>
+                              //endif
+                            }
+                          </Form.Group>
+
+                          {
+                            //if
+                            (true === view.data.form.validated) ?
+                              <Spinner animation="border" role="status" className="mt-3">
+                                <span className="visually-hidden">Loading...</span>
+                              </Spinner>
+                            //else
+                            :
+                              <Button variant="dark" type="submit" className="mt-3">
+                                Propose Project
+                              </Button>
+                            //endif
+                          }
+                        </Form>
+                      </Row>
+                    </>
+                    //else
+                    :
+                      <Row className="justify-content-md-center mt-5">
+                        <Alert variant="light" style={{ width: "50%" }}>
+                          <Alert.Heading className="mb-3">Project Succcesfully Proposed!</Alert.Heading>
+
+                          <p className="lead">Waiting for approval...</p>
+
+                          <hr />
+
+                          <p className="mb-3">
+                            You can check the status of the project <a href="/myAccount" style={{ color: "black" }}>here</a>.
+                          </p>
+
+                          <Link to={{ pathname: `/home/` }} className="btn btn-dark">
+                            Return To Homepage
+                          </Link>
+                        </Alert>
+                      </Row>
+                    //endif
+                  //else
+                  : <Redirect to="/login" />
+                  //endif
+                //else
+                :
+                  <Row className="justify-content-md-center mt-5">
+                    <Alert variant="light" style={{ width: "50%" }}>
+                      <Alert.Heading className="mb-3">Oh snap! You got an error!</Alert.Heading>
+
+                      <p className="lead">Web3, accounts or contracts not loaded...</p>
+
+                      <hr />
+
+                      <p className="mb-3">
+                        Make sure you have MetaMask installed and your account is connected to Crowd Funding ETH.
+                      </p>
+
+                      <Link to={{ pathname: `/startProject` }} className="btn btn-dark">
+                        Reload Page
+                      </Link>
+                    </Alert>
+                  </Row>
+                //endif
+              //endif
+            }
+          </Card.Body>
+        </Card>
       </Container>
     );
   }
