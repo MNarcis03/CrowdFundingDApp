@@ -86,16 +86,15 @@ class AdminControlCenter extends Component {
     this.generatePaginationItems = this.generatePaginationItems.bind(this);
     this.handlePageClick = this.handlePageClick.bind(this);
     this.approveProject = this.approveProject.bind(this);
+    this.fetchUsers = this.fetchUsers.bind(this);
+    this.getUserProfile = this.getUserProfile.bind(this);
+    this.generateUsersView = this.generateUsersView.bind(this);
   }
 
   componentDidMount = async () => {
     try {
-      // Get network provider and web3 instance
       const web3 = await getWeb3();
-
-      // Use web3 to get the user's accounts
       const accounts = await web3.eth.getAccounts();
-
       let networkId = await web3.eth.net.getId();
 
       const crowdFunding = new web3.eth.Contract(
@@ -168,7 +167,15 @@ class AdminControlCenter extends Component {
             this.setState({ view });
           }
         }
-      }      
+
+        view.data.users.fetched = await this.fetchUsers();
+
+        if (view.data.users.fetched && view.data.users.fetched.length > 0) {
+          view.data.users.generated = this.generateUsersView(view.data.users.fetched);
+
+          this.setState({ view });
+        }
+      }
     } catch (err) {
       console.error("Err @ ComponentDidMount():", err.message);
 
@@ -277,7 +284,7 @@ class AdminControlCenter extends Component {
 
         const ownerAddr = await crowdFunding.methods.getOwner(it).call();
         project.owner = await this.getUsername(ownerAddr);
-        
+
         project.name = await crowdFunding.methods.getName(it).call();
         project.approved = await crowdFunding.methods.isApproved(it).call();
         project.open = await crowdFunding.methods.isOpen(it).call();
@@ -310,10 +317,10 @@ class AdminControlCenter extends Component {
     listGroupItems.push(
       <ListGroup.Item as="li">
         <Row>
-          <Col><b>Project</b></Col>
-          <Col><b>Owner</b></Col>
-          <Col><b>Balance</b></Col>
-          <Col><b>Status</b></Col>
+          <Col><i>PROJECT</i></Col>
+          <Col><i>OWNER</i></Col>
+          <Col><i>FUNDING</i></Col>
+          <Col><i>STATUS</i></Col>
         </Row>
       </ListGroup.Item>
     );
@@ -360,6 +367,21 @@ class AdminControlCenter extends Component {
     if (listGroupItems.length > 0) {
       let paginationItems = null;
 
+      if (pagination.activePage > 1 && pagination.ITEMS_PER_PAGE * pagination.activePage > _projects.length) {
+        for (let it = _projects.length; it < pagination.ITEMS_PER_PAGE * pagination.activePage; it++) {
+          listGroupItems.push(
+            <ListGroup.Item as="li">
+              <Row>
+                <Col>-</Col>
+                <Col>-</Col>
+                <Col>-</Col>
+                <Col>-</Col>
+              </Row>
+            </ListGroup.Item>
+          );
+        }
+      }
+
       if (pagination.ITEMS_PER_PAGE < _projects.length) {
         const { E_PROJECTS_VIEW } = this.state.view.enumeration;
 
@@ -377,7 +399,7 @@ class AdminControlCenter extends Component {
           {
             //if
             (null !== paginationItems) ?
-              <Pagination size="sm" className="mt-5 justify-content-md-center mt-3">
+              <Pagination size="sm" className="mt-5 justify-content-md-center">
                 { paginationItems }
               </Pagination>
             //else
@@ -468,6 +490,10 @@ class AdminControlCenter extends Component {
 
         view.data.projects.generated = this.generateProjectsView(view.data.projects.fetched);
       } else if (view.enumeration.E_USERS_VIEW === _view) {
+        view.data.users.pagination.activePage = _page;
+        this.setState({ view });
+
+        view.data.users.generated = this.generateUsersView(view.data.users.fetched);
       }
 
       this.setState({ view });
@@ -490,12 +516,151 @@ class AdminControlCenter extends Component {
         this.setState({ view });
       } catch (err) {
         console.err("Err @ approveProject():", err.message);
-  
+
         alert(
           `Transaction failed or was rejected. Check console for details.`,
         );
       }
     })();
+  }
+
+  fetchUsers = async () => {
+    let fetched = [];
+
+    try {
+      const { crowdFunding, ipfsHashStorage, token } = this.state.contracts;
+
+      const accounts = await ipfsHashStorage.methods.getAccounts().call();
+
+      for (let it = 0; it < accounts.length; it++) {
+        let userProfile = await this.getUserProfile(accounts[it]);
+
+        if (userProfile !== null) {
+          userProfile.balance = await token.methods.balanceOf(accounts[it]).call();
+
+          fetched.push(userProfile);
+        }
+      }
+    } catch (err) {
+      console.error("Err @ fetchUsers():", err.message);
+      return null;
+    }
+
+    return fetched;
+  }
+
+  getUserProfile = async (_accountAddress) => {
+    try {
+      const { ipfsHashStorage } = this.state.contracts;
+
+      const ipfsHash = await ipfsHashStorage.methods.getAccountIpfsHash(_accountAddress).call();
+
+      const ipfsContent = ipfs.cat(ipfsHash);
+
+      const decodedIpfsContent = await this.decodeIpfsContent(ipfsContent);
+
+      return decodedIpfsContent;
+    } catch (err) {
+      console.error("Err @ getUserProfile():", err.message);
+    }
+
+    return null;
+  }
+
+  generateUsersView(_users) {
+    let listGroup = [];
+    let listGroupItems = [];
+
+    const { pagination } = this.state.view.data.users;
+    const { token } = this.state;
+
+    let start = pagination.ITEMS_PER_PAGE * (pagination.activePage - 1);
+    let end = pagination.ITEMS_PER_PAGE * pagination.activePage;
+
+    if (end > _users.length) {
+      end = _users.length;
+    }
+
+    listGroupItems.push(
+      <ListGroup.Item as="li">
+        <Row>
+          <Col><b>USERNAME</b></Col>
+          <Col><b>E-MAIL</b></Col>
+          <Col><b>FIRSTNAME</b></Col>
+          <Col><b>SECONDNAME</b></Col>
+          <Col><b>{ token.symbol } BALANCE</b></Col>
+          <Col><b>STATE</b></Col>
+          <Col><b>CITY</b></Col>
+        </Row>
+      </ListGroup.Item>
+    );
+
+    for (let it = start; it < end; it++) {
+      listGroupItems.push(
+        <ListGroup.Item as="li">
+          <Row>
+            <Col>{ _users[it].username }</Col>
+            <Col>{ _users[it].email }</Col>
+            <Col>{ _users[it].firstname }</Col>
+            <Col>{ _users[it].lastname }</Col>
+            <Col>{ _users[it].balance / token.decimals }</Col>
+            <Col>{ _users[it].state }</Col>
+            <Col>{ _users[it].city }</Col>
+          </Row>
+        </ListGroup.Item>
+      );
+    }
+
+    if (listGroupItems.length > 0) {
+      let paginationItems = null;
+
+      if (pagination.activePage > 1 && pagination.ITEMS_PER_PAGE * pagination.activePage > _users.length) {
+        for (let it = _users.length; it < pagination.ITEMS_PER_PAGE * pagination.activePage; it++) {
+          listGroupItems.push(
+            <ListGroup.Item as="li">
+              <Row>
+                <Col>-</Col>
+                <Col>-</Col>
+                <Col>-</Col>
+                <Col>-</Col>
+                <Col>-</Col>
+                <Col>-</Col>
+                <Col>-</Col>
+              </Row>
+            </ListGroup.Item>
+          );
+        }
+      }
+
+      if (pagination.ITEMS_PER_PAGE < _users.length) {
+        const { E_USERS_VIEW } = this.state.view.enumeration;
+
+        paginationItems = this.generatePaginationItems(
+          E_USERS_VIEW, _users.length
+        );
+      }
+
+      listGroup.push(
+        <Row className="justify-content-md-center">
+          <ListGroup as="ol" variant="flush" style={{ width: "100%" }}>
+            { listGroupItems }
+          </ListGroup>
+
+          {
+            //if
+            (null !== paginationItems) ?
+              <Pagination size="sm" className="mt-5 justify-content-md-center">
+                { paginationItems }
+              </Pagination>
+            //else
+            : <></>
+            //endif
+          }
+        </Row>
+      );
+    }
+
+    return listGroup;
   }
 
   render() {
@@ -578,8 +743,8 @@ class AdminControlCenter extends Component {
                           //if
                           (true === view.active.users) ?
                             //if
-                            ((null !== view.data.users.generated) && (view.data.projects.users.length > 0)) ?
-                              view.data.projects.users
+                            ((null !== view.data.users.generated) && (view.data.users.generated.length > 0)) ?
+                              view.data.users.generated
                             //else
                             : <Card.Text className="lead">No users available...</Card.Text>
                             //endif
@@ -604,7 +769,7 @@ class AdminControlCenter extends Component {
                       </Alert>
                     </Row>
                   //endif
-                //endif        
+                //endif
               }
             </Card.Body>
           </Card>

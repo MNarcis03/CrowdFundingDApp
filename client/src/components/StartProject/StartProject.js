@@ -1,7 +1,7 @@
 import React, { Component } from "react";
 import { Redirect, Link } from "react-router-dom";
 import {
-  Container, Row,
+  Container, Row, Col,
   Alert,
   Card,
   Form, FormControl,
@@ -11,6 +11,7 @@ import {
 } from "react-bootstrap";
 
 import getWeb3 from "./../../utils/getWeb3";
+import ipfs from "./../../utils/ipfs";
 import session from "./../../utils/session";
 
 import IpfsHashStorage from "./../../contracts/IpfsHashStorage.json";
@@ -53,18 +54,21 @@ class StartProject extends Component {
               category: "None",
               goal: 0,
               description: "",
+              image: null,
             },
             errors: {
               title: null,
               category: null,
               goal: null,
               description: null,
+              image: null,
             },
             fieldEnumeration: {
               TITLE: 0,
               CATEGORY: 1,
               GOAL: 2,
               DESCRIPTION: 3,
+              IMAGE: 4,
             },
           },
         },
@@ -200,15 +204,21 @@ class StartProject extends Component {
 
       if (!!view.data.form.errors.goal) {
         view.data.form.errors.goal = null;
-      }  
+      }
     } else if (view.data.form.fieldEnumeration.DESCRIPTION === field) {
       view.data.form.input.description = value;
 
       if (!!view.data.form.errors.description) {
         view.data.form.errors.description = null;
       }
+    } else if (view.data.form.fieldEnumeration.IMAGE === field) {
+      view.data.form.input.image = value;
+
+      if (!!view.data.form.errors.description) {
+        view.data.form.errors.description = null;
+      }
     }
- 
+
     this.setState({ view });
   }
 
@@ -240,11 +250,11 @@ class StartProject extends Component {
   checkErrors() {
     let errors  = {};
 
-    const { title, category, goal, description } = this.state.view.data.form.input;
+    const { title, category, goal, description, image } = this.state.view.data.form.input;
 
-    if ((!title) || ("" === title)) {
+    if (!title || ("" === title)) {
       errors.title = "Please choose a title for your project.";
-    } else if ((title < 8) || (title > 30)) {
+    } else if ((title.length < 8) || (title.length > 30)) {
       errors.title = "Project's title must have between 8 and 30 characters.";
     }
 
@@ -256,10 +266,14 @@ class StartProject extends Component {
       errors.goal = "Please choose a goal for your project.";
     }
 
-    if ((!description) || ("" === description)) {
+    if (!description || ("" === description)) {
       errors.description = "Please write a description for your project.";
-    } else if ((title < 10) || (title > 30)) {
+    } else if ((description.length < 10) || (description.length > 300)) {
       errors.description = "Project's description must have between 100 and 300 characters.";
+    }
+
+    if (null === image) {
+      errors.image = "Please choose a image for your project.";
     }
 
     return errors;
@@ -284,11 +298,22 @@ class StartProject extends Component {
   startProject = async () => {
     try {
       const { contracts, accounts, token } = this.state;
-      const { input } = this.state.view.data.form;
+      const { title, goal, category, description, image } = this.state.view.data.form.input;
+
+      const added = await ipfs.add(image);
+      const imageUrl = `http://ipfs.localhost:8080/ipfs/${ added.path }`;
+      console.log(imageUrl);
+
+      const ipfsContent = {
+        category, description, imageUrl
+      };
+
+      const buffer = [Buffer.from(JSON.stringify(ipfsContent))];
+
+      const ipfsHash = await ipfs.add(buffer);
 
       await contracts.crowdFunding.methods.create(
-        input.title,
-        input.goal * token.decimals
+        title, goal * token.decimals, ipfsHash.cid.toString()
       ).send({ from: accounts[0] });
     } catch (err) {
       console.error("Err @ startProject():", err.message);
@@ -480,6 +505,33 @@ class StartProject extends Component {
                               : <Form.Control.Feedback>Looks good!</Form.Control.Feedback>
                               //endif
                             }
+                          </Form.Group>
+
+                          <Form.Group controlId="formProjectFile">
+                            <Form.Label className="lead">Image</Form.Label>
+
+                            <Form.File
+                              required
+                              id="FormProjectFile1"
+                              onChange={
+                                e => this.setField(
+                                  view.data.form.fieldEnumeration.IMAGE,
+                                  e.target.files[0]
+                                )
+                              }
+                              isInvalid={ !!view.data.form.errors.image }
+                            />
+
+                            {
+                              //if
+                              (false === view.data.form.validated) ?
+                                <Form.Control.Feedback type="invalid">
+                                  { view.data.form.errors.image }
+                                </Form.Control.Feedback>
+                              //else
+                              : <Form.Control.Feedback>Looks good!</Form.Control.Feedback>
+                              //endif
+                            }                       
                           </Form.Group>
 
                           {

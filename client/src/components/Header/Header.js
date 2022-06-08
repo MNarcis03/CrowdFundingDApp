@@ -230,8 +230,7 @@ class Header extends Component {
                       <Nav.Link href="/crowdsale">{ token.symbol }: { token.accountBalance / token.decimals }</Nav.Link>
 
                       <NavDropdown title="My Account" id="my-account-nav-dropdown">
-                        <NavDropdown.Item href="/crowdsale">{ userAccount.username } Wallet</NavDropdown.Item>
-                        <NavDropdown.Item href="/myAccount">{ userAccount.username } Portofolio</NavDropdown.Item>
+                        <NavDropdown.Item href="/myAccount">{ userAccount.username } Profile</NavDropdown.Item>
                         <NavDropdown.Divider />
                         <NavDropdown.Item href="/logout">Logout</NavDropdown.Item>
                       </NavDropdown>

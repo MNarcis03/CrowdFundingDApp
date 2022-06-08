@@ -131,7 +131,7 @@ class Register extends Component {
 
   userIsLoggedIn = async () => {
     if (false === session.sessionExpired()) {
-      if (true === await this.userExists()) {
+      if (true === await this.userHasAccount()) {
         return true;
       }
     }
@@ -332,18 +332,14 @@ class Register extends Component {
       let account = {
         email, firstname, lastname, username, password, state, city
       };
-      console.log("Account:", account);
 
       const buffer = [Buffer.from(JSON.stringify(account))];
-      console.log("Buffer:", buffer);
 
       const ipfsHash = await ipfs.add(buffer);
-      console.log("ipfsHash:", ipfsHash.cid.toString());
 
       await contracts.ipfsHashStorage.methods.setAccountIpfsHash(
         ipfsHash.cid.toString()
       ).send({ from: accounts[0] });
-      console.log("contract.methods.setAccountIpfsHash(): Success");
     } catch (err) {
       console.error("Err @ register():", err.message);
       return false;
@@ -665,11 +661,18 @@ class Register extends Component {
                           </Form>                              
                         </Row>
 
-                        <Card.Text className="mt-3">
-                          <a href="/login" className="text-muted" style={{ color: "black" }}>
-                            Already have an account?
-                          </a>
-                        </Card.Text>
+                        {
+                          //if
+                          (false === view.data.form.validated) ?
+                            <Card.Text className="mt-3">
+                              <a href="/login" className="text-muted" style={{ color: "black" }}>
+                                Already have an account?
+                              </a>
+                            </Card.Text>
+                          //else
+                          : <></>
+                          //endif
+                        }
                       </>
                     //else
                     : <Redirect to="/login" />

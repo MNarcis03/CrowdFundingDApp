@@ -43,7 +43,7 @@ class MyAccount extends Component {
       },
       userAccount: {
         isLoggedIn: false,
-        username: "",
+        userProfile: null,
       },
       view: {
         loaded: false,
@@ -80,7 +80,7 @@ class MyAccount extends Component {
 
     this.userIsLoggedIn = this.userIsLoggedIn.bind(this);
     this.userHasAccount = this.userHasAccount.bind(this);
-    this.getUsername = this.getUsername.bind(this);
+    this.getUserProfile = this.getUserProfile.bind(this);
     this.decodeIpfsContent = this.decodeIpfsContent.bind(this);
     this.fetchCreatedProjects = this.fetchCreatedProjects.bind(this);
     this.generateCreatedProjectsView = this.generateCreatedProjectsView.bind(this);
@@ -144,7 +144,7 @@ class MyAccount extends Component {
       const isLoggedIn = await this.userIsLoggedIn();
 
       if (true === isLoggedIn) {
-        const username = await this.getUsername();
+        const userProfile = await this.getUserProfile();
 
         view.data.createdProjects.fetched = await this.fetchCreatedProjects();
 
@@ -153,7 +153,7 @@ class MyAccount extends Component {
           (view.data.createdProjects.fetched.length > 0)
         ) {
           this.setState({ view });
-          view.data.createdProjects.generated = await this.generateCreatedProjectsView();
+          view.data.createdProjects.generated = this.generateCreatedProjectsView();
         }
 
         view.data.fundedProjects.fetched = await this.fetchFundedProjects();
@@ -168,7 +168,7 @@ class MyAccount extends Component {
 
         this.setState({
           userAccount: {
-            isLoggedIn, username,
+            isLoggedIn, userProfile,
           },
           view,
         });
@@ -216,8 +216,8 @@ class MyAccount extends Component {
     return false;
   }
 
-  getUsername = async (_userAddr) => {
-    let username = "";
+  getUserProfile = async (_userAddr) => {
+    let userProfile = {};
 
     try {
       const { accounts } = this.state;
@@ -229,14 +229,21 @@ class MyAccount extends Component {
 
       const decodedIpfsContent = await this.decodeIpfsContent(ipfsContent);
 
-      if (decodedIpfsContent.username) {
-        username = decodedIpfsContent.username;
+      if (null !== decodedIpfsContent) {
+        console.log(decodedIpfsContent);
+        userProfile.email = decodedIpfsContent.email;
+        userProfile.firstname = decodedIpfsContent.firstname;
+        userProfile.lastname = decodedIpfsContent.lastname;
+        userProfile.username = decodedIpfsContent.username;
+        userProfile.state = decodedIpfsContent.state;
+        userProfile.city = decodedIpfsContent.city;
       }
     } catch (err) {
       console.error("Err @ getUsername():", err.message);
+      return null;
     }
 
-    return username;
+    return userProfile;
   }
 
   decodeIpfsContent = async (_ipfsContent) => {
@@ -314,9 +321,9 @@ class MyAccount extends Component {
       listGroupItems.push(
         <ListGroup.Item as="li">
           <Row>
-            <Col><b>Project</b></Col>
-            <Col><b>Balance</b></Col>
-            <Col><b>Status</b></Col>
+            <Col><i>PROJECT</i></Col>
+            <Col><i>FUNDING</i></Col>
+            <Col><i>STATUS</i></Col>
           </Row>
         </ListGroup.Item>
       );
@@ -371,6 +378,23 @@ class MyAccount extends Component {
 
       if (listGroupItems.length > 0) {
         let paginationItems = null;
+
+        if (
+          createdProjects.pagination.activePage > 1 &&
+          createdProjects.pagination.ITEMS_PER_PAGE * createdProjects.pagination.activePage > createdProjects.fetched.length
+        ) {
+          for (let it = createdProjects.fetched.length; it < createdProjects.pagination.ITEMS_PER_PAGE * createdProjects.pagination.activePage; it++) {
+            listGroupItems.push(
+              <ListGroup.Item as="li">
+                <Row>
+                  <Col>-</Col>
+                  <Col>-</Col>
+                  <Col>-</Col>
+                </Row>
+              </ListGroup.Item>
+            );
+          }
+        }
 
         if (createdProjects.pagination.ITEMS_PER_PAGE < createdProjects.fetched.length) {
           const { E_CREATED_PROJECTS_VIEW } = this.state.view.enumeration;
@@ -433,7 +457,8 @@ class MyAccount extends Component {
             project.open = await crowdFunding.methods.isOpen(projectsIds[it]).call();
 
             const ownerAddr = await crowdFunding.methods.getOwner(projectsIds[it]).call();
-            project.owner = await this.getUsername(ownerAddr);
+            const userProfile = await this.getUserProfile(ownerAddr);
+            project.owner = userProfile.username;
 
             projects.push(project);
           } catch (err) {
@@ -470,10 +495,10 @@ class MyAccount extends Component {
       listGroupItems.push(
         <ListGroup.Item as="li">
           <Row>
-            <Col><b>Project</b></Col>
-            <Col><b>Owner</b></Col>
-            <Col><b>Status</b></Col>
-            <Col><b>Your Balance</b></Col>
+            <Col><i>PROJECT</i></Col>
+            <Col><i>OWNER</i></Col>
+            <Col><i>STATUS</i></Col>
+            <Col><i>YOUR FUNDING</i></Col>
           </Row>
         </ListGroup.Item>
       );
@@ -503,6 +528,24 @@ class MyAccount extends Component {
 
       if (listGroupItems.length > 0) {
         let paginationItems = null;
+
+        if (
+          fundedProjects.pagination.activePage > 1 &&
+          fundedProjects.pagination.ITEMS_PER_PAGE * fundedProjects.pagination.activePage > fundedProjects.fetched.length
+        ) {
+          for (let it = fundedProjects.fetched.length; it < fundedProjects.pagination.ITEMS_PER_PAGE * fundedProjects.pagination.activePage; it++) {
+            listGroupItems.push(
+              <ListGroup.Item as="li">
+                <Row>
+                  <Col>-</Col>
+                  <Col>-</Col>
+                  <Col>-</Col>
+                  <Col>-</Col>
+                </Row>
+              </ListGroup.Item>
+            );
+          }
+        }
 
         if (fundedProjects.pagination.ITEMS_PER_PAGE < fundedProjects.fetched.length) {
           const { E_FUNDED_PROJECTS_VIEW } = this.state.view.enumeration;
@@ -647,7 +690,7 @@ class MyAccount extends Component {
     const { web3, accounts, contracts, token, userAccount, view } = this.state;
 
     return (
-      <Container fluid="md" className="MyAccount" style={{ width: "100%", height: "60%" }}>
+      <Container fluid="md" className="MyAccount" style={{ width: "100%", height: "70%" }}>
         {/* <Row className="justify-content-md-center" style={{ width: "100%", height: "100%" }}> */}
           <Card border="light" className="text-center" style={{ width: "100%", height: "100%" }}>
             <Card.Body className="mt-3 mb-3" style={{ width: "100%", height: "100%" }}>
@@ -678,7 +721,7 @@ class MyAccount extends Component {
                     :
                       <>
                         <Card.Title className="display-6 mb-5">
-                          { userAccount.username }'s Account
+                          { userAccount.userProfile.username }'s Account
                         </Card.Title>
 
                         <ButtonGroup className="mb-5" style={{ width: "45%" }}>
@@ -690,7 +733,7 @@ class MyAccount extends Component {
                             style={{ width: "33%" }}
                             active={ view.active.wallet }
                           >
-                            Wallet
+                            Profile
                           </Button>
 
                           <Button
@@ -719,11 +762,72 @@ class MyAccount extends Component {
                         {
                           //if
                           (view.active.wallet === true) ?
-                            <Card.Text className="lead">
-                              Your Account's Balance: {
-                                token.accountBalance.div(token.decimals).toString()
-                              } { token.symbol }
-                            </Card.Text>
+                            <>
+                              <Row className="mb-1">
+                                <Col>
+                                  <Card.Text className="lead">
+                                    <b>Wallet Account Address:</b>
+                                  </Card.Text>
+                                </Col>
+                                <Col>
+                                  <Card.Text className="lead">
+                                    <b>Wallet Balance:</b>
+                                  </Card.Text>
+                                </Col>
+                              </Row>
+
+                              <Row className="mb-3">
+                                <Col>
+                                  <Card.Text className="lead">
+                                    { accounts[0] }
+                                  </Card.Text>
+                                </Col>
+                                <Col>
+                                  <Card.Text className="lead">
+                                    { token.accountBalance.div(token.decimals).toString() } { token.symbol }
+                                  </Card.Text>
+                                </Col>
+                              </Row>
+
+                              <Row className="mb-3">
+                                <Col>
+                                  <Card.Text className="lead">
+                                    <b>User Name:</b> { userAccount.userProfile.username }
+                                  </Card.Text>
+                                </Col>
+                                <Col>
+                                  <Card.Text className="lead">
+                                    <b>E-Mail:</b> { userAccount.userProfile.email }
+                                  </Card.Text>
+                                </Col>
+                              </Row>
+
+                              <Row className="mb-3">
+                                <Col>
+                                  <Card.Text className="lead">
+                                    <b>First Name:</b> { userAccount.userProfile.firstname }
+                                  </Card.Text>
+                                </Col>
+                                <Col>
+                                  <Card.Text className="lead">
+                                    <b>Last Name:</b> { userAccount.userProfile.lastname }
+                                  </Card.Text>
+                                </Col>
+                              </Row>
+
+                              <Row>
+                                <Col>
+                                  <Card.Text className="lead">
+                                    <b>State:</b> { userAccount.userProfile.state }
+                                  </Card.Text>
+                                </Col>
+                                <Col>
+                                  <Card.Text className="lead">
+                                    <b>City:</b> { userAccount.userProfile.city }
+                                  </Card.Text>
+                                </Col>
+                              </Row>
+                            </>
                           //else
                           : <></>
                           //endif

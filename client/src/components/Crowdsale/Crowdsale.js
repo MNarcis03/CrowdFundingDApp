@@ -1,7 +1,7 @@
 import React, { Component } from "react";
 import { Redirect, Link } from "react-router-dom";
 import {
-  Container, Row,
+  Container, Row, Col,
   Alert,
   Card,
   Form, FormControl,
@@ -391,7 +391,7 @@ class Crowdsale extends Component {
     const { web3, networkId, accounts, contracts, token, userAccount, view } = this.state;
 
     return (
-      <Container fluid="md auto" className="Crowdsale" style={{ width: "100%", height: "70%" }}>
+      <Container fluid="md auto" className="Crowdsale" style={{ width: "100%", height: "60%" }}>
         <Card border="light" className="text-center" style={{ width: "100%", height: "100%" }}>
           <Card.Body className="mt-3 mb-3" style={{ width: "100%", height: "100%" }}>
             {

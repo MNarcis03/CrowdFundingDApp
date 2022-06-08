@@ -2,11 +2,13 @@ import React, { Component } from "react";
 import { withRouter } from "react-router";
 import {
   Alert,
-  Container, Row,
+  Container, Row, Col,
   Card,
   ButtonGroup, Button,
-  FormControl,
+  Form, FormControl,
   InputGroup,
+  Accordion,
+  Image,
   Spinner
 } from "react-bootstrap";
 
@@ -49,27 +51,64 @@ class ViewProject extends Component {
       view: {
         loaded: false,
         active: {
-          deposit: true,
-          withdraw: false,
-          owner: false,
+          campaign: true,
+          forFunders: false,
+          updates: false,
+          addUpdate: false,
+          edit: false,
         },
         data: {
-          fetched: {
-            project: null,
+          project: {
+            fetched: null,
           },
-          inputGroup: {
-            deposit: {
-              amount: 0,
+          form: {
+            validated: false,
+            submitted: false,
+            failed: false,
+            input: {
+              depositAmount: 0,
+              withdrawAmount: 0,
             },
-            withdraw: {
-              amount: 0,
+            errors: {
+              depositAmount: null,
+              withdrawAmount: null,
+            },
+            view: {
+              deposit: true,
+              withdraw: false,
+            },
+            viewEnumeration: {
+              E_DEPOSIT_VIEW: 0,
+              E_WITHDRAW_VIEW: 1,
             },
           },
+          addUpdateForm: {
+            validated: false,
+            submitted: false,
+            failed: false,
+            input: {
+              updateTitle: null,
+              updateDescription: null,
+            },
+            errors: {
+              updateTitle: null,
+              updateDescription: null,
+            },
+            fieldEnumeration: {
+              E_TITLE_FIELD: 0,
+              E_DESCRIPTION_FIELD: 1,
+            },
+          },
+          updates: {
+            generated: null,
+          }
         },
         enumeration: {
-          E_DEPOSIT_VIEW: 0,
-          E_WITHDRAW_VIEW: 1,
-          E_OWNER_VIEW: 2,
+          E_CAMPAIGN_VIEW: 0,
+          E_FOR_FUNDERS_VIEW: 1,
+          E_UPDATES_VIEW: 2,
+          E_ADD_UPDATE_VIEW: 3,
+          E_EDIT_VIEW: 4,
         },
       },
     };
@@ -80,11 +119,23 @@ class ViewProject extends Component {
     this.userIsLoggedIn = this.userIsLoggedIn.bind(this);
     this.userHasAccount = this.userHasAccount.bind(this);
     this.userIsOwner = this.userIsOwner.bind(this);
+    this.handleSubmit = this.handleSubmit.bind(this);
+    this.checkErrors = this.checkErrors.bind(this);
+    this.handleDeposit = this.handleDeposit.bind(this);
     this.deposit = this.deposit.bind(this);
-    this.withdraw = this.withdraw.bind(this);
-    this.close = this.close.bind(this);
     this.changeDepositAmount = this.changeDepositAmount.bind(this);
+    this.withdraw = this.withdraw.bind(this);
     this.changeWithdrawAmount = this.changeWithdrawAmount.bind(this);
+    this.handleAddUpdate = this.handleAddUpdate.bind(this);
+    this.checkAddUpdateErrors = this.checkAddUpdateErrors.bind(this);
+    this.handleAddUpdateToIpfs = this.handleAddUpdateToIpfs.bind(this);
+    this.addUpdateToIpfs = this.addUpdateToIpfs.bind(this);
+    this.setAddUpdateField = this.setAddUpdateField.bind(this);
+    this.resetAddUpdateForm = this.resetAddUpdateForm.bind(this);
+    this.generateUpdatesView = this.generateUpdatesView.bind(this);
+    this.close = this.close.bind(this);
+    this.resetForFundersView = this.resetForFundersView.bind(this);
+    this.setFormView = this.setFormView.bind(this);
     this.setView = this.setView.bind(this);
   }
 
@@ -140,9 +191,12 @@ class ViewProject extends Component {
       let { view } = this.state;
 
       const projectId = this.props.match.params.id;
-      view.data.fetched.project = await this.fetchProject(projectId);
+      view.data.project.fetched = await this.fetchProject(projectId);
 
-      if (null !== view.data.fetched.project) {
+      if (null !== view.data.project.fetched) {
+        this.setState({ view });
+
+        view.data.updates.generated = this.generateUpdatesView();
         this.setState({ view });
 
         const isLoggedIn = await this.userIsLoggedIn();
@@ -202,6 +256,30 @@ class ViewProject extends Component {
               await crowdFunding.methods.getFunderBalance(
                 _projectId, accounts[0]
               ).call();
+
+            const funders = await crowdFunding.methods.getFunders(_projectId).call();
+            project.funders = funders.length;
+
+            project.ipfsHash = await crowdFunding.methods.getIpfsHash(_projectId).call();
+
+            const ipfsContent = ipfs.cat(project.ipfsHash);
+            const decodedIpfsContent = await this.decodeIpfsContent(ipfsContent);
+
+            if (decodedIpfsContent && decodedIpfsContent.description) {
+              project.description = decodedIpfsContent.description;
+            }
+
+            if (decodedIpfsContent && decodedIpfsContent.category) {
+              project.category = decodedIpfsContent.category;
+            }
+
+            if (decodedIpfsContent && decodedIpfsContent.updates) {
+              project.updates = decodedIpfsContent.updates;
+            }
+
+            if (decodedIpfsContent && decodedIpfsContent.imageUrl) {
+              project.imageUrl = decodedIpfsContent.imageUrl;
+            }
           }
         }
       } catch (err) {
@@ -299,6 +377,75 @@ class ViewProject extends Component {
     return false;
   }
 
+  handleSubmit(_event) {
+    const form = _event.currentTarget;
+
+    if (true === form.checkValidity()) {
+      let { view } = this.state;
+
+      const errors = this.checkErrors();
+
+      view.data.form.errors = errors;
+      this.setState({ view });
+
+      if (Object.keys(errors).length < 1) {
+        view.data.form.validated = true;
+        this.setState({ view });
+
+        (async () => {
+          if (true === view.data.form.view.deposit) {
+            await this.handleDeposit();
+          } else if (true === view.data.form.view.withdraw) {
+            await this.handleWithdraw();
+          }
+        })();
+      }
+    }
+
+    _event.preventDefault();
+    _event.stopPropagation();
+  }
+
+  checkErrors() {
+    let errors = {};
+
+    const { token } = this.state;
+    const { fetched } = this.state.view.data.project;
+    const { depositAmount, withdrawAmount } = this.state.view.data.form.input;
+    const { deposit, withdraw } = this.state.view.data.form.view;
+
+    if (true === deposit) {
+      if (depositAmount < 1) {
+        errors.depositAmount = "Funding Amount Should Be Greater Than Zero.";
+      } else if (depositAmount > (token.accountBalance / token.decimals)) {
+        errors.depositAmount = "Funding Amount Exceeds Account's Balance";
+      }
+    } else if (true === withdraw) {
+      if (withdrawAmount < 1) {
+        errors.withdrawAmount = "Withdraw Amount Should Be Greater Than Zero.";
+      } else if (withdrawAmount > (fetched.funderBalance / token.decimals)) {
+        errors.withdrawAmount = "Withdraw Amount Exceeds Your Funding";
+      }
+    }
+
+    return errors;
+  }
+
+  handleDeposit = async () => {
+    let { view } = this.state;
+
+    const response = await this.deposit();
+
+    if (true === response) {
+      view.data.form.submitted = true;
+    } else {
+      view.data.form.validated = false;
+      view.data.form.failed = true;
+    }
+
+    this.setState({ view });
+  }
+
   deposit = async () => {
     try {
       const { accounts, networkId, contracts } = this.state;
@@ -310,110 +457,38 @@ class ViewProject extends Component {
 
       await contracts.token.methods.approve(
         crowdFundingAddress,
-        view.data.inputGroup.deposit.amount * token.decimals
+        view.data.form.input.depositAmount * token.decimals
       ).send({ from: accounts[0] });
 
       await contracts.crowdFunding.methods.deposit(
-        view.data.fetched.project.id,
-        view.data.inputGroup.deposit.amount * token.decimals
+        view.data.project.fetched.id,
+        view.data.form.input.depositAmount * token.decimals
       ).send({ from: accounts[0] });
 
       const accountBalance = await contracts.token.methods.balanceOf(accounts[0]).call();
       token.accountBalance = new BigNumber(accountBalance);
       this.setState({ token });
 
-      view.data.fetched.project.balance =
+      view.data.project.fetched.balance =
         await contracts.crowdFunding.methods.getBalance(
-          view.data.fetched.project.id
+          view.data.project.fetched.id
         ).call();
 
-      view.data.fetched.project.funderBalance =
+      view.data.project.fetched.funderBalance =
         await contracts.crowdFunding.methods.getFunderBalance(
-          view.data.fetched.project.id, accounts[0]
+          view.data.project.fetched.id, accounts[0]
         ).call();
 
-      this.setState({ view });
-
-      alert(
-        `Thank you for supporting our community!`,
-      );
-    } catch (err) {
-      console.error("Err @ deposit(): ", err.message);
-
-      alert(
-        `Transaction failed or was rejected. Check console for details.`,
-      );
-    }
-  }
-
-  withdraw = async () => {
-    try {
-      const { accounts, networkId, contracts } = this.state;
-      let { token, view } = this.state;
-
-      const crowdFundingAddress =
-        CrowdFunding.networks[networkId] && CrowdFunding.networks[networkId].address;
-
-      await contracts.crowdFunding.methods.withdraw(
-        view.data.fetched.project.id,
-        view.data.inputGroup.withdraw.amount * token.decimals
-      ).send({ from: accounts[0] });
-
-      await contracts.token.methods.transferFrom(
-        crowdFundingAddress, accounts[0],
-        view.data.inputGroup.withdraw.amount * token.decimals
-      ).send({ from: accounts[0] });;
-
-      const accountBalance = await contracts.token.methods.balanceOf(accounts[0]).call();
-      token.accountBalance = new BigNumber(accountBalance);
-      this.setState({ token });
-
-      view.data.fetched.project.balance =
-        await contracts.crowdFunding.methods.getBalance(
-          view.data.fetched.project.id
-        ).call();
-
-      view.data.fetched.project.funderBalance =
-        await contracts.crowdFunding.methods.getFunderBalance(
-          view.data.fetched.project.id, accounts[0]
-        ).call();
+      const funders = await contracts.crowdFunding.methods.getFunders(view.data.project.fetched.id).call();
+      view.data.project.fetched.funders = funders.length;
 
       this.setState({ view });
-
-      alert(
-        `Thank you for supporting our community!`,
-      );
     } catch (err) {
-      console.error("Err @ withdraw(): ", err.message);
-
-      alert(
-        `Transaction failed or was rejected. Check console for details.`,
-      );
+      console.error("Err @ deposit():", err.message);
+      return false;
     }
-  }
 
-  close = async () => {
-    try {
-      const { accounts, contracts } = this.state;
-      let { view } = this.state;
-
-      await contracts.crowdFunding.methods.close(
-        view.data.fetched.project.id
-      ).send({ from: accounts[0] });
-
-      view.data.fetched.project.isOpen = false;
-      this.setState({ view });
-
-      alert(
-        `Thank you for supporting our community!`,
-      );
-    } catch (err) {
-      console.error("Err @ close():", err.message);
-
-      alert(
-        `Transaction failed or was rejected. Check console for details.`,
-      );
-    }
+    return true;
   }
 
   changeDepositAmount(_event) {
@@ -425,13 +500,69 @@ class ViewProject extends Component {
       const balance = token.accountBalance / token.decimals;
 
       if ((_event.target.value >= 1) && (_event.target.value <= balance)) {
-        view.data.inputGroup.deposit.amount = _event.target.value;
+        view.data.form.input.depositAmount = _event.target.value;
         this.setState({ view });
       }
     } else {
-      view.data.inputGroup.deposit.amount = 0;
+      view.data.form.input.depositAmount = 0;
       this.setState({ view });
     }
+  }
+
+  handleWithdraw = async () => {
+    let { view } = this.state;
+
+    const response = await this.withdraw();
+
+    if (true === response) {
+      view.data.form.submitted = true;
+    } else {
+      view.data.form.validated = false;
+      view.data.form.failed = true;
+    }
+
+    this.setState({ view });
+  }
+
+  withdraw = async () => {
+    try {
+      const { accounts, networkId, contracts } = this.state;
+      let { token, view } = this.state;
+
+      const crowdFundingAddress =
+        CrowdFunding.networks[networkId] && CrowdFunding.networks[networkId].address;
+
+      await contracts.crowdFunding.methods.withdraw(
+        view.data.project.fetched.id,
+        view.data.form.input.withdrawAmount * token.decimals
+      ).send({ from: accounts[0] });
+
+      await contracts.token.methods.transferFrom(
+        crowdFundingAddress, accounts[0],
+        view.data.form.input.withdrawAmount * token.decimals
+      ).send({ from: accounts[0] });;
+
+      const accountBalance = await contracts.token.methods.balanceOf(accounts[0]).call();
+      token.accountBalance = new BigNumber(accountBalance);
+      this.setState({ token });
+
+      view.data.project.fetched.balance =
+        await contracts.crowdFunding.methods.getBalance(
+          view.data.project.fetched.id
+        ).call();
+
+      view.data.project.fetched.funderBalance =
+        await contracts.crowdFunding.methods.getFunderBalance(
+          view.data.project.fetched.id, accounts[0]
+        ).call();
+
+      this.setState({ view });
+    } catch (err) {
+      console.error("Err @ withdraw():", err.message);
+      return false;
+    }
+
+    return true;
   }
 
   changeWithdrawAmount(_event) {
@@ -440,33 +571,283 @@ class ViewProject extends Component {
     if (_event && _event.target.value) {
       const { token } = this.state;
 
-      const balance = token.accountBalance / token.decimals;
+      const balance = view.data.project.fetched.funderBalance / token.decimals;
 
       if ((_event.target.value >= 1) && (_event.target.value <= balance)) {
-        view.data.inputGroup.withdraw.amount = _event.target.value;
+        view.data.form.input.withdrawAmount = _event.target.value;
+
+        if (!!view.data.form.errors.withdrawAmount) {
+          view.data.form.errors.withdrawAmount = null;
+        }
+
         this.setState({ view });
       }
     } else {
-      view.data.inputGroup.withdraw.amount = 0;
+      view.data.form.input.withdrawAmount = 0;
       this.setState({ view });
+    }
+  }
+
+  handleAddUpdate(_event) {
+    const form = _event.currentTarget;
+
+    if (true === form.checkValidity()) {
+      let { view } = this.state;
+
+      const addUpdateErrors = this.checkAddUpdateErrors();
+
+      view.data.addUpdateForm.errors = addUpdateErrors;
+      this.setState({ view });
+
+      if (!addUpdateErrors.updateTitle && !addUpdateErrors.updateDescription) {
+        view.data.addUpdateForm.validated = true;
+        this.setState({ view });
+
+        (async () => {
+          await this.handleAddUpdateToIpfs();
+        })();
+      }
+    }
+
+    _event.preventDefault();
+    _event.stopPropagation();
+  }
+
+  checkAddUpdateErrors() {
+    let addUpdateErrors = {
+      updateTitle: null,
+      updateDescription: null,
+    };
+
+    const { updateTitle, updateDescription } = this.state.view.data.addUpdateForm.input;
+
+    if (!updateTitle) {
+      addUpdateErrors.updateTitle = "Please fill out this field.";
+    } else if (updateTitle.length > 30) {
+      addUpdateErrors.updateTitle = "Update Title Too Long.";
+    }
+
+    if (!updateDescription) {
+      addUpdateErrors.updateDescription = "Please fill out this field.";
+    } else if (updateDescription.length < 10 || updateDescription > 30) {
+      addUpdateErrors.updateDescription = "Update Description must have between 100 and 300 characters.";
+    }
+
+    return addUpdateErrors;
+  }
+
+  handleAddUpdateToIpfs = async () => {
+    let { view } = this.state;
+
+    const response = await this.addUpdateToIpfs();
+
+    if (true === response) {
+      view.data.addUpdateForm.submitted = true;
+    } else {
+      view.data.addUpdateForm.validated = false;
+      view.data.addUpdateForm.failed = true;
+    }
+
+    this.setState({ view });
+  }
+
+  addUpdateToIpfs = async () => {
+    try {
+      let { view } = this.state;
+
+      const ipfsContent = ipfs.cat(view.data.project.fetched.ipfsHash);
+
+      const decodedIpfsContent = await this.decodeIpfsContent(ipfsContent);
+
+      if (decodedIpfsContent) {
+        const { accounts } = this.state;
+        const { crowdFunding } = this.state.contracts;
+
+        let updates = [];
+        let update = {
+          title: view.data.addUpdateForm.input.updateTitle,
+          description: view.data.addUpdateForm.input.updateDescription,
+        };
+
+        if (decodedIpfsContent.updates) {
+          updates = decodedIpfsContent.updates;
+        }
+
+        updates.push(update);
+        decodedIpfsContent.updates = updates;
+
+        const buffer = [Buffer.from(JSON.stringify(decodedIpfsContent))];
+        const ipfsHash = await ipfs.add(buffer);
+
+        const response = await crowdFunding.methods.setIpfsHash(
+          view.data.project.fetched.id, ipfsHash.cid.toString()
+        ).send({ from: accounts[0] });
+
+        const ipfsContent = ipfs.cat(ipfsHash.cid.toString());
+        const _decodedIpfsContent = await this.decodeIpfsContent(ipfsContent);
+        
+        view.data.project.fetched.updates = updates;
+        this.setState({ view });
+        view.data.updates.generated = this.generateUpdatesView();
+        this.setState({ view });
+      }
+    } catch (err) {
+      console.error("Err @ addUpdateToIpfs():", err.message);
+      return false;
+    }
+
+    return true;
+  }
+
+  setAddUpdateField(_field, _value) {
+    let { view } = this.state;
+
+    if (view.data.addUpdateForm.fieldEnumeration.E_TITLE_FIELD === _field) {
+      view.data.addUpdateForm.input.updateTitle = _value;
+
+      if (!!view.data.addUpdateForm.errors.updateTitle) {
+        view.data.addUpdateForm.errors.updateTitle = null;
+      }
+    } else if (view.data.addUpdateForm.fieldEnumeration.E_DESCRIPTION_FIELD === _field) {
+      view.data.addUpdateForm.input.updateDescription = _value;
+
+      if (!!view.data.addUpdateForm.errors.updateDescription) {
+        view.data.addUpdateForm.errors.updateDescription = null;
+      }
+    }
+
+    this.setState({ view });
+  }
+
+  resetAddUpdateForm() {
+    let { view } = this.state;
+
+    view.data.addUpdateForm.validated = false;
+    view.data.addUpdateForm.submitted = false;
+    view.data.addUpdateForm.failed = false;
+    view.data.addUpdateForm.input.updateTitle = null;
+    view.data.addUpdateForm.input.updateDescription = null;
+    view.data.addUpdateForm.errors.updateTitle = null;
+    view.data.addUpdateForm.errors.updateDescription = null;
+
+    this.setState({ view });
+  }
+
+  generateUpdatesView() {
+    let updatesView = null;
+
+    const { project } = this.state.view.data;
+
+    if (project.fetched.updates && project.fetched.updates.length > 0) {
+      let updates = [];
+
+      for (let it = 0; it < project.fetched.updates.length; it++) {
+        const update =
+          <Card>
+            <Accordion.Toggle as={ Card.Header } eventKey={ it + 1 }>
+              #{ it + 1 } Update: { project.fetched.updates[it].title }
+            </Accordion.Toggle>
+
+            <Accordion.Collapse eventKey={ it + 1 }>
+              <Card.Body>{ project.fetched.updates[it].description }</Card.Body>
+            </Accordion.Collapse>
+          </Card>
+        ;
+        updates.push(update);
+      }
+
+      if (updates.length > 0) {
+        updatesView =
+          <Row className="justify-content-md-center">
+            <Accordion style={{ width: "60%" }}>{ updates }</Accordion>
+          </Row>;
+      }
+    }
+
+    return updatesView;
+  }
+
+  close = async () => {
+    try {
+      const { accounts, contracts } = this.state;
+      let { view } = this.state;
+
+      await contracts.crowdFunding.methods.close(
+        view.data.project.fetched.id
+      ).send({ from: accounts[0] });
+
+      
+
+      view.data.project.fetched.isOpen = false;
+      this.setState({ view });
+    } catch (err) {
+      console.error("Err @ close():", err.message);
+    }
+  }
+
+  resetForFundersView() {
+    let { view } = this.state;
+
+    view.data.form.input.depositAmount = 0;
+    view.data.form.errors.depositAmount = null;
+    view.data.form.validated = false;
+    view.data.form.submitted = false;
+    view.data.form.failed = false;
+
+    this.setState({ view });
+  }
+
+  setFormView(_formView) {
+    let { view } = this.state;
+
+    if (view.data.form.viewEnumeration.E_DEPOSIT_VIEW === _formView) {
+      if (false === view.data.form.view.deposit) {
+        view.data.form.view.deposit = true;
+        view.data.form.view.withdraw = false;
+        this.setState({ view });
+      }
+    } else if (view.data.form.viewEnumeration.E_WITHDRAW_VIEW === _formView) {
+      if (false === view.data.form.view.withdraw) {
+        view.data.form.view.deposit = false;
+        view.data.form.view.withdraw = true;
+        this.setState({ view });
+      }
     }
   }
 
   setView(_view) {
     let { view } = this.state;
 
-    if (_view === view.enumeration.E_DEPOSIT_VIEW) {
-      view.active.deposit = true;
-      view.active.withdraw = false;
-      view.active.owner = false;
-    } else if (_view === view.enumeration.E_WITHDRAW_VIEW) {
-      view.active.deposit = false;
-      view.active.withdraw = true;
-      view.active.owner = false;
-    } else if (_view === view.enumeration.E_OWNER_VIEW) {
-      view.active.deposit = false;
-      view.active.withdraw = false;
-      view.active.owner = true;
+    if (_view === view.enumeration.E_CAMPAIGN_VIEW) {
+      view.active.campaign = true;
+      view.active.forFunders = false;
+      view.active.updates = false;
+      view.active.addUpdate = false;
+      view.active.edit = false;
+    } else if (_view === view.enumeration.E_FOR_FUNDERS_VIEW) {
+      view.active.campaign = false;
+      view.active.forFunders = true;
+      view.active.updates = false;
+      view.active.addUpdate = false;
+      view.active.edit = false;
+    } else if (_view === view.enumeration.E_UPDATES_VIEW) {
+      view.active.campaign = false;
+      view.active.forFunders = false;
+      view.active.updates = true;
+      view.active.addUpdate = false;
+      view.active.edit = false;
+    } else if (_view === view.enumeration.E_ADD_UPDATE_VIEW) {
+      view.active.campaign = false;
+      view.active.forFunders = false;
+      view.active.updates = false;
+      view.active.addUpdate = true;
+      view.active.edit = false;
+    } else if (_view === view.enumeration.E_EDIT_VIEW) {
+      view.active.campaign = false;
+      view.active.forFunders = false;
+      view.active.updates = false;
+      view.active.addUpdate = false;
+      view.active.edit = true;
     }
 
     this.setState({ view });
@@ -476,7 +857,7 @@ class ViewProject extends Component {
     const { web3, accounts, contracts, token, userAccount, view } = this.state;
 
     return (
-      <Container fluid="md auto" className="DiscoverProjects" style={{ width: "100%", height: "60%" }}>
+      <Container fluid="md auto" className="ViewProject" style={{ width: "100%", height: "80%" }}>
         <Card border="light" className="text-center" style={{ width: "100%", height: "100%" }}>
           <Card.Body className="mt-3 mb-3" style={{ width: "100%", height: "100%" }}>
             {
@@ -500,144 +881,153 @@ class ViewProject extends Component {
                   (null !== contracts.crowdsale) && (null !== contracts.ipfsHashStorage)
                 ) ?
                   //if
-                  (null !== view.data.fetched.project) ?
+                  (null !== view.data.project.fetched) ?
                     <>
                       <Card.Title className="display-6 mb-3">
-                        { view.data.fetched.project.name }
+                        { view.data.project.fetched.name }
                       </Card.Title>
 
                       <Card.Text className="text-muted mb-3">
-                        Created by { view.data.fetched.project.owner }
+                        Created by { view.data.project.fetched.owner }
                       </Card.Text>
 
-                      <ButtonGroup className="mb-3" style={{ width: "30%" }}>
+                      <Card.Text className="text-muted mb-3">
+                        {
+                          //if
+                          (true === view.data.project.fetched.isOpen) ?
+                            <>Funding Ongoing</>
+                          //else
+                          :
+                            <>Funding Finished</>
+                          //endif
+                        }
+                      </Card.Text>
+
+                      <Row className="justify-content-md-center mb-3">
+                        <Col>
+                          <Card.Text className="text-muted">
+                            Funding Goal: { view.data.project.fetched.goal / token.decimals } { token.symbol }
+                          </Card.Text>
+                        </Col>
+                        <Col>
+                          <Card.Text className="text-muted">
+                            Raised Capital: { view.data.project.fetched.balance / token.decimals } { token.symbol }
+                          </Card.Text>
+                        </Col>
+                        <Col>
+                          <Card.Text className="text-muted">
+                            { view.data.project.fetched.funders } Funders
+                          </Card.Text>
+                        </Col>
+                      </Row>
+
+                      {
+                        //if
+                        (view.data.project.fetched.funderBalance / token.decimals > 0) ?
+                          <Card.Text className="text-muted mb-3">
+                            You Funded { view.data.project.fetched.name } With { view.data.project.fetched.funderBalance / token.decimals } { token.symbol }.
+                          </Card.Text>
+                        //else
+                        : <></>
+                        //endif
+                      }
+
+                      <ButtonGroup className="mb-5" style={{ width: "50%" }}>
+                        <Button
+                          type="submit"
+                          onClick={ () => this.setView(view.enumeration.E_CAMPAIGN_VIEW) }
+                          active={ view.active.campaign }
+                          variant="outline-secondary"
+                          className="fw-bold"
+                          style={{ width: "20%" }}
+                        >
+                          Campaign
+                        </Button>
+
+                        <Button
+                          type="submit"
+                          onClick={ () => this.setView(view.enumeration.E_FOR_FUNDERS_VIEW) }
+                          active={ view.active.forFunders }
+                          variant="outline-secondary"
+                          className="fw-bold"
+                          style={{ width: "20%" }}
+                        >
+                          For Funders
+                        </Button>
+
+                        <Button
+                          type="submit"
+                          onClick={ () => this.setView(view.enumeration.E_UPDATES_VIEW) }
+                          active={ view.active.updates }
+                          variant="outline-secondary"
+                          className="fw-bold"
+                          style={{ width: "20%" }}
+                        >
+                          Updates
+                        </Button>
+
                         {
                           //if
                           (true === userAccount.isOwner) ?
                             <>
-                              <Button
-                                type="submit"
-                                onClick={ () => this.setView(view.enumeration.E_DEPOSIT_VIEW) }
-                                active={ view.active.deposit }
-                                variant="outline-secondary"
-                                className="fw-bold"
-                                style={{ width: "33%" }}
-                              >
-                                Deposit
-                              </Button>
+                            <Button
+                              type="submit"
+                              onClick={ () => this.setView(view.enumeration.E_ADD_UPDATE_VIEW) }
+                              active={ view.active.addUpdate }
+                              variant="outline-secondary"
+                              className="fw-bold"
+                              style={{ width: "20%" }}
+                            >
+                              Add Update
+                            </Button>
 
-                              <Button
-                                type="submit"
-                                onClick={ () => this.setView(view.enumeration.E_WITHDRAW_VIEW) }
-                                active={ view.active.withdraw }
-                                variant="outline-secondary"
-                                className="fw-bold"
-                                style={{ width: "33%" }}
-                              >
-                                Withdraw
-                              </Button>
+                            <Button
+                              type="submit"
+                              variant="outline-secondary"
+                              className="fw-bold"
+                              style={{ width: "20%" }}
+                              disabled={
+                                !userAccount.isOwner ||
+                                !view.data.project.fetched.isOpen ||
+                                view.data.project.fetched.balance < view.data.project.fetched.goal
+                              }
+                              onClick={ this.close }
+                            >
+                              Close Project
+                            </Button>
 
-                              <Button
-                                type="submit"
-                                onClick={ () => this.setView(view.enumeration.E_OWNER_VIEW) }
-                                active={ view.active.owner }
-                                variant="outline-secondary"
-                                className="fw-bold"
-                                style={{ width: "33%" }}
-                              >
-                                For Owner
-                              </Button>
+                            {/* <Button
+                              type="submit"
+                              onClick={ () => this.setView(view.enumeration.E_EDIT_VIEW) }
+                              active={ view.active.edit }
+                              variant="outline-secondary"
+                              className="fw-bold"
+                              style={{ width: "20%" }}
+                            >
+                              Close Project
+                            </Button> */}
                             </>
                           //else
-                          :
-                            <>
-                              <Button
-                                type="submit"
-                                onClick={ () => this.setView(view.enumeration.E_DEPOSIT_VIEW) }
-                                active={ view.active.deposit }
-                                variant="outline-secondary"
-                                className="fw-bold"
-                                style={{ width: "50%" }}
-                              >
-                                Deposit
-                              </Button>
-
-                              <Button
-                                type="submit"
-                                onClick={ () => this.setView(view.enumeration.E_WITHDRAW_VIEW) }
-                                active={ view.active.withdraw }
-                                variant="outline-secondary"
-                                className="fw-bold"
-                                style={{ width: "50%" }}
-                              >
-                                Withdraw
-                              </Button>
-                            </>
+                          : <></>
                           //endif
                         }
                       </ButtonGroup>
 
                       {
                         //if
-                        (true === view.active.deposit) ?
-                          <>
-                            <Card.Text className="lead">
-                              {
-                                view.data.fetched.project.isOpen ?
-                                  "Open For Funding" : "Funding Finished"
-                              }
+                        (true === view.active.campaign) ?
+                          <Row className="justify-content-md-center">
+                            <Image
+                              src={ view.data.project.fetched.imageUrl }
+                              fluid
+                              className="mb-3"
+                              style={{ width: "30%" }}
+                            />
+                            
+                            <Card.Text>
+                              { view.data.project.fetched.description }
                             </Card.Text>
-
-                            <Card.Text className="text-muted">
-                              { view.data.fetched.project.balance / token.decimals }/
-                              { view.data.fetched.project.goal / token.decimals } { token.symbol } Total Funding {
-                                //if
-                                (view.data.fetched.project.funderBalance > 0) ?
-                                  <>
-                                    ({
-                                      view.data.fetched.project.funderBalance /
-                                      token.decimals
-                                    } { token.symbol } Funded By You)
-                                  </>
-                                //else
-                                : <></>
-                                //endif
-                              }
-                            </Card.Text>
-
-                            <Card.Text className="text-muted">
-                              Your Account's Balance: { token.accountBalance / token.decimals } { token.symbol }
-                            </Card.Text>
-
-                            <Row className="mb-3 justify-content-md-center">
-                              <InputGroup  style={{ width: "30%" }}>
-                                <InputGroup.Text>{ token.symbol } Amount</InputGroup.Text>
-
-                                <FormControl
-                                  type="number"
-                                  placeholder={ `Enter ${ token.symbol } Amount` }
-                                  aria-label={ `How many ${ token.symbol } you deposit?` }
-                                  value={ view.data.inputGroup.deposit.amount }
-                                  min="1"
-                                  onChange={ this.changeDepositAmount }
-                                  required
-                                />
-
-                                <Button
-                                  type="submit"
-                                  variant="outline-secondary"
-                                  disabled={ !userAccount.isLoggedIn || !view.data.fetched.project.isOpen }
-                                  onClick={ this.deposit }
-                                >
-                                  Deposit
-                                </Button>
-                              </InputGroup>
-                            </Row>
-
-                            <a href="/crowdsale" className="text-muted" style={{ color: "black" }}>
-                              Need more { token.symbol } to back this project?
-                            </a>
-                          </>
+                          </Row>
                         //else
                         : <></>
                         //endif
@@ -645,61 +1035,208 @@ class ViewProject extends Component {
 
                       {
                         //if
-                        (true === view.active.withdraw) ?
-                          <>
-                            <Card.Text className="lead">
-                              {
-                                view.data.fetched.project.isOpen ?
-                                  "Open For Withdrawing Funds" : "Funding Finished"
-                              }
-                            </Card.Text>
+                        (true === view.active.forFunders) ?
+                          //if
+                          (false === view.data.form.submitted) ?
+                            <>
+                              <Row className="justify-content-md-center">
+                                {
+                                  //if
+                                  (true === view.data.form.failed) ?
+                                    <Card.Text className="lead mb-3" style={{ color: "red" }}>
+                                      Transaction Failed OR Was Rejected!
+                                    </Card.Text>
+                                  //else
+                                  : <></>
+                                  //endif
+                                }
 
-                            <Card.Text className="text-muted">
-                              { view.data.fetched.project.balance / token.decimals }/
-                              { view.data.fetched.project.goal / token.decimals } { token.symbol } Total Funding {
+                                <Form
+                                  validated={ view.data.form.validated }
+                                  onSubmit={ this.handleSubmit }
+                                  style={{ width: "80%" }}
+                                >
+                                  <Form.Group as={ Row } className="mb-3" controlId="formAccountAddress">
+                                    <Form.Label column sm="4">Account Address</Form.Label>
+
+                                    <Col sm="6">
+                                      <Form.Control plaintext readOnly defaultValue={ accounts[0] }/>
+                                    </Col>
+                                  </Form.Group>
+
+                                  <Form.Group as={ Row } className="mb-3" controlId="formAccountBalance">
+                                    <Form.Label column sm="4">Account { token.symbol } Balance</Form.Label>
+
+                                    <Col sm="6">
+                                      <Form.Control plaintext readOnly defaultValue={ token.accountBalance / token.decimals }/>
+                                    </Col>
+                                  </Form.Group>
+
+                                  <Form.Group as={ Row } className="mb-5" controlId="formAmount">
+                                    <Form.Label column sm="4">
+                                      {
+                                        //if
+                                        (true === view.data.form.view.deposit) ?
+                                          <>Funding Amount</>
+                                        //else
+                                        : <>Withdraw Amount</>
+                                        //endif
+                                      }
+                                    </Form.Label>
+
+                                    <Col sm="6">
+                                      <InputGroup>
+                                        <FormControl
+                                          required
+                                          type="number"
+                                          placeholder={ `Enter ${ token.symbol } Amount` }
+                                          value={
+                                            //if
+                                            (true === view.data.form.view.deposit) ?
+                                              view.data.form.input.depositAmount
+                                            //else
+                                            : view.data.form.input.withdrawAmount
+                                            //endif
+                                          }
+                                          min="0"
+                                          onChange={
+                                            //if
+                                            (true === view.data.form.view.deposit) ?
+                                              this.changeDepositAmount
+                                            //else
+                                            : this.changeWithdrawAmount
+                                            //endif
+                                          }
+                                          isInvalid={
+                                            //if
+                                            (true === view.data.form.view.deposit) ?
+                                              !!view.data.form.errors.depositAmount
+                                            //else
+                                            : !!view.data.form.errors.withdrawAmount
+                                            //endif
+                                          }
+                                        />
+
+                                        <InputGroup.Text>{ token.symbol }</InputGroup.Text>
+
+                                        {
+                                          //if
+                                          (false === view.data.form.validated) ?
+                                            <Form.Control.Feedback type="invalid">
+                                              {
+                                                //if
+                                                (true === view.data.form.view.deposit) ?
+                                                  view.data.form.errors.depositAmount
+                                                //else
+                                                : view.data.form.errors.withdrawAmount
+                                                //endif
+                                              }
+                                            </Form.Control.Feedback>
+                                          //else
+                                          : <Form.Control.Feedback>Looks good!</Form.Control.Feedback>
+                                          //endif
+                                        }
+                                      </InputGroup>
+                                    </Col>
+                                  </Form.Group>
+
+                                  {
+                                    //if
+                                    (true === view.data.form.validated) ?
+                                      <Spinner animation="border" role="status">
+                                        <span className="visually-hidden">Loading...</span>
+                                      </Spinner>
+                                    //else
+                                    :
+                                      <Button
+                                        type="submit"
+                                        variant="outline-secondary"
+                                        disabled={
+                                          !userAccount.isLoggedIn ||
+                                          !view.data.project.fetched.isOpen ||
+                                          (userAccount.balance / token.decimals < 1)
+                                        }
+                                      >
+                                        {
+                                          //if
+                                          (true === view.data.form.view.deposit) ?
+                                            <>Fund { view.data.project.fetched.name }</>
+                                          //else
+                                          :
+                                            <>Withdraw Funds</>
+                                          //endif
+                                        }
+                                      </Button>
+                                    //endif
+                                  }
+                                </Form>
+                              </Row>
+
+                              {
                                 //if
-                                (view.data.fetched.project.funderBalance > 0) ?
-                                  <>
-                                    ({
-                                      view.data.fetched.project.funderBalance /
-                                      token.decimals
-                                    } { token.symbol } Funded By You)
-                                  </>
+                                (
+                                  (view.data.project.fetched.funderBalance / token.decimals > 0) &&
+                                  (false === view.data.form.validated)
+                                ) ?
+                                  <Row className="justify-content-md-center">
+                                    <Button
+                                      variant="link"
+                                      className="mt-3"
+                                      style={{ width: "25%", color: "black" }}
+                                      onClick={
+                                        //if
+                                        (true === view.data.form.view.deposit) ?
+                                          () => this.setFormView(view.data.form.viewEnumeration.E_WITHDRAW_VIEW)
+                                        //else
+                                        :
+                                          () => this.setFormView(view.data.form.viewEnumeration.E_DEPOSIT_VIEW)
+                                        //endif
+                                      }
+                                    >
+                                      {
+                                        //if
+                                        (true === view.data.form.view.deposit) ?
+                                          <>Click Here To Withdraw Funds.</>
+                                        //else
+                                        :
+                                          <>Click Here To Fund { view.data.project.fetched.name }.</>
+                                        //endif
+                                      }
+                                    </Button>
+                                  </Row>
                                 //else
                                 : <></>
                                 //endif
                               }
-                            </Card.Text>
+                            </>
+                            //else
+                            :
+                              <>
+                                <Card.Text className="lead">
+                                  Thank You For Supporting { view.data.project.fetched.name }!
+                                </Card.Text>
 
-                            <Card.Text className="text-muted">
-                              Your Account's Balance: { token.accountBalance / token.decimals } { token.symbol }
-                            </Card.Text>
+                                <Card.Text className="text-muted">
+                                  {
+                                    //if
+                                    (true === view.data.form.view.deposit) ?
+                                      <>
+                                        You Successfuly Funded { view.data.form.input.depositAmount } { token.symbol }.
+                                      </>
+                                    //else
+                                    :
+                                      <>
+                                        { view.data.form.input.withdrawAmount } { token.symbol } Fallback Into Your Account.
+                                      </>
+                                    //endif
+                                  }
+                                </Card.Text>
 
-                            <Row className="mb-3 justify-content-md-center">
-                              <InputGroup style={{ width: "30%" }}>
-                                <InputGroup.Text>{ token.symbol } Amount</InputGroup.Text>
-
-                                <FormControl
-                                  type="number"
-                                  placeholder={ `Enter ${ token.symbol } Amount` }
-                                  aria-label={ `How many ${ token.symbol } you withdraw?` }
-                                  value={ view.data.inputGroup.withdraw.amount }
-                                  min="1"
-                                  onChange={ this.changeWithdrawAmount }
-                                  required
-                                />
-
-                                <Button
-                                  type="submit"
-                                  variant="outline-secondary"
-                                  disabled={ !userAccount.isLoggedIn || !view.data.fetched.project.isOpen }
-                                  onClick={ this.withdraw }
-                                >
-                                  Withdraw
+                                <Button onClick={ this.resetForFundersView } variant="outline-secondary" className="mt-3">
+                                  Go Back
                                 </Button>
-                              </InputGroup>
-                            </Row>
-                          </>
+                              </>
+                            //endif
                         //else
                         : <></>
                         //endif
@@ -707,36 +1244,167 @@ class ViewProject extends Component {
 
                       {
                         //if
-                        (true === view.active.owner) ?
-                          <>
-                            <Card.Text className="lead">
+                        (true === view.active.addUpdate) ?
+                          //if
+                          (false === view.data.addUpdateForm.submitted) ?
+                            <Row className="justify-content-md-center">
                               {
-                                view.data.fetched.project.isOpen ?
-                                  "Funding Ongoing" : "Funding Finished"
+                                //if
+                                (true === view.data.addUpdateForm.failed) ?
+                                  <Card.Text className="lead mb-3" style={{ color: "red" }}>
+                                    Transaction Failed OR Was Rejected!
+                                  </Card.Text>
+                                //else
+                                : <></>
+                                //endif
                               }
-                            </Card.Text>
 
-                            <Card.Text className="text-muted">
-                              Total Funding: {
-                                view.data.fetched.project.balance / token.decimals
-                              }/{ 
-                                view.data.fetched.project.goal / token.decimals
-                              } { token.symbol }
-                            </Card.Text>
+                              <Form
+                                validated={ view.data.addUpdateForm.validated }
+                                onSubmit={ this.handleAddUpdate }
+                                style={{ width: "80%" }}
+                              >
+                                <Form.Group as={ Row } className="mb-3" controlId="formUpdateTitle">
+                                  <Form.Label column sm="4">Title</Form.Label>
 
-                            <Card.Text className="text-muted">
-                              Your Account's Balance: { token.accountBalance / token.decimals } { token.symbol }
-                            </Card.Text>
+                                  <Col sm="6">
+                                    <Form.Control
+                                      required
+                                      type="text"
+                                      placeholder="Update Title"
+                                      onChange={
+                                        e => this.setAddUpdateField(
+                                          view.data.addUpdateForm.fieldEnumeration.E_TITLE_FIELD,
+                                          e.target.value
+                                        )
+                                      }
+                                      isInvalid={ !!view.data.addUpdateForm.errors.updateTitle }
+                                    />
 
+                                    {
+                                      //if
+                                      (false === view.data.addUpdateForm.validated) ?
+                                        <Form.Control.Feedback type="invalid">
+                                          { view.data.addUpdateForm.errors.updateTitle }
+                                        </Form.Control.Feedback>
+                                      //else
+                                      : <Form.Control.Feedback>Looks good!</Form.Control.Feedback>
+                                      //endif
+                                    }
+                                  </Col>
+
+                                  
+                                </Form.Group>
+
+                                <Form.Group as={ Row } className="mb-3" controlId="formUpdateDescription">
+                                  <Form.Label column sm="4">Description</Form.Label>
+
+                                  <Col sm="6">
+                                    <Form.Control
+                                      required
+                                      as="textarea"
+                                      placeholder="Update Description"
+                                      onChange={
+                                        e => this.setAddUpdateField(
+                                          view.data.addUpdateForm.fieldEnumeration.E_DESCRIPTION_FIELD,
+                                          e.target.value
+                                        )
+                                      }
+                                      isInvalid={ !!view.data.addUpdateForm.errors.updateDescription }
+                                    />
+
+                                    {
+                                      //if
+                                      (false === view.data.addUpdateForm.validated) ?
+                                        <Form.Control.Feedback type="invalid">
+                                          { view.data.addUpdateForm.errors.updateDescription }
+                                        </Form.Control.Feedback>
+                                      //else
+                                      : <Form.Control.Feedback>Looks good!</Form.Control.Feedback>
+                                      //endif
+                                    }
+                                  </Col>
+                                </Form.Group>
+
+                                {
+                                  //if
+                                  (true === view.data.addUpdateForm.validated) ?
+                                    <Spinner animation="border" role="status" className="mt-3">
+                                      <span className="visually-hidden">Loading...</span>
+                                    </Spinner>
+                                  //else
+                                  :
+                                    <Button variant="secondary" type="submit" className="mt-3">
+                                      Add Update
+                                    </Button>
+                                  //endif
+                                }
+                              </Form>
+                            </Row>
+                          //else
+                          :
+                            <>
+                              <Card.Text className="lead">
+                                Update { view.data.addUpdateForm.input.updateTitle } Successfully Added To { view.data.project.fetched.name }!
+                              </Card.Text>
+
+                              <Button onClick={ this.resetAddUpdateForm } variant="outline-secondary" className="mt-3">
+                                Go Back
+                              </Button>
+                            </>
+                          //endif
+                        //else
+                        : <></>
+                        //endif
+                      }
+
+                      {
+                        //if
+                        (true === view.active.updates) ?
+                          //if
+                          (null !== view.data.updates.generated) ?
+                            view.data.updates.generated
+                          //else
+                          : <></>
+                          //endif
+                        //else
+                        : <></>
+                        //endif
+                      }
+
+                      {
+                        //if
+                        (true === view.active.edit) ?
+                          <>
                             <Row className="text-center justify-content-md-center">
                               <Button
                                   type="submit"
                                   variant="outline-secondary"
-                                  disabled={ !userAccount.isLoggedIn || !view.data.fetched.project.isOpen }
+                                  disabled={
+                                    !userAccount.isOwner ||
+                                    view.data.project.fetched.balance < view.data.project.fetched.goal
+                                  }
                                   onClick={ this.close }
-                                  style={{ width: "10%" }}
+                                  style={
+                                    (view.data.project.fetched.balance < view.data.project.fetched.goal) ?
+                                      { width: "25%" }
+                                    :
+                                      { width: "10%" }
+                                  }
                                 >
-                                  Close Project
+                                  {
+                                    //if
+                                    (view.data.project.fetched.balance < view.data.project.fetched.goal) ?
+                                    //else
+                                      <>
+                                        Requires {
+                                          (view.data.project.fetched.goal / token.decimals) -
+                                          (view.data.project.fetched.balance / token.decimals)
+                                        } More { token.symbol } For Closing
+                                      </>
+                                    : <>Close Project</>
+                                    //endif
+                                  }
                                 </Button>
                             </Row>
                           </>

@@ -14,6 +14,7 @@ contract CrowdFunding {
     uint256 balance;
     mapping (address => uint256) fundersBalances;
     address [] funders;
+    string ipfsHash;
   }
 
   mapping (uint256 => CrowdFundingProject) private projects_;
@@ -28,6 +29,13 @@ contract CrowdFunding {
   constructor(IERC20 _crowdFundingToken) public {
     crowdFundingToken_ = _crowdFundingToken;
     lastProjectId_ = 0;
+  }
+
+  function setIpfsHash(uint256 _projectId, string memory _ipfsHash) public returns (bool) {
+    require (_projectId < lastProjectId_, "setIpfsHash(): Invalid Project!");
+    projects_[_projectId].ipfsHash = _ipfsHash;
+
+    return true;
   }
 
   function getOwner(uint256 _projectId) public view returns (address) {
@@ -65,6 +73,16 @@ contract CrowdFunding {
     return projects_[_projectId].fundersBalances[_funder];
   }
 
+  function getFunders(uint256 _projectId) public view returns (address [] memory) {
+    require (_projectId < lastProjectId_, "getFunders(): Invalid Project!");
+    return projects_[_projectId].funders;
+  }
+
+  function getIpfsHash(uint256 _projectId) public view returns (string memory) {
+    require (_projectId < lastProjectId_, "getIpfsHash(): Invalid Project!");
+    return projects_[_projectId].ipfsHash;
+  }
+
   function getLastProjectId() public view returns (uint256) {
     return lastProjectId_;
   }
@@ -87,13 +105,14 @@ contract CrowdFunding {
     return userFundedProjects_[_user];
   }
 
-  function create(string memory _name, uint32 _goal) public returns (bool) {
+  function create(string memory _name, uint32 _goal, string memory _ipfsHash) public returns (bool) {
     projects_[lastProjectId_].owner = msg.sender;
     projects_[lastProjectId_].name = _name;
     projects_[lastProjectId_].approved = false;
     projects_[lastProjectId_].open = true;
     projects_[lastProjectId_].goal = _goal;
     projects_[lastProjectId_].balance = 0;
+    projects_[lastProjectId_].ipfsHash = _ipfsHash;
 
     ownerProjects_[msg.sender].push(lastProjectId_);
     owners_.push(msg.sender);

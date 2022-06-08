@@ -19,6 +19,10 @@ contract IpfsHashStorage {
     return accountsIpfsHashes_[_account];
   }
 
+  function getAccounts() public view returns (address [] memory) {
+    return accounts_;
+  }
+
   function accountHasIpfsHash(address _account) public view returns (bool) {
     require (_account != address(0), "accountHasIpfsHash(): Invalid User!");
 

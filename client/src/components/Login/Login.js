@@ -113,7 +113,7 @@ class Login extends Component {
 
   userIsLoggedIn = async () => {
     if (false === session.sessionExpired()) {
-      if (true === await this.userExists()) {
+      if (true === await this.userHasAccount()) {
         return true;
       }
     }
@@ -280,7 +280,7 @@ class Login extends Component {
     const { web3, accounts, contracts, userAccount, view } = this.state;
 
     return (
-      <Container fluid="md auto" className="Crowdsale" style={{ width: "100%", height: "70%" }}>
+      <Container fluid="md auto" className="Crowdsale" style={{ width: "100%", height: "60%" }}>
         <Card border="light" className="text-center" style={{ width: "100%", height: "100%" }}>
           <Card.Body className="mt-3 mb-3" style={{ width: "100%", height: "100%" }}>
             {
@@ -406,11 +406,18 @@ class Login extends Component {
                         </Form>
                       </Row>
 
-                      <Card.Text className="mt-3">
-                        <a href="/register" className="text-muted" style={{ color: "black" }}>
-                          Don't have an account?
-                        </a>
-                      </Card.Text>
+                      {
+                        //if
+                        (false === view.data.form.validated) ?
+                          <Card.Text className="mt-3">
+                            <a href="/register" className="text-muted" style={{ color: "black" }}>
+                              Don't have an account?
+                            </a>
+                          </Card.Text>
+                        //else
+                        : <></>
+                        //endif
+                      }
                     </>
                   //else
                   : <Redirect to="/home" />
