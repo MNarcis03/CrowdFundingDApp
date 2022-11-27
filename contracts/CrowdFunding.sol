@@ -207,7 +207,7 @@ contract CrowdFunding {
       "distributeFunding(): Invalid Project/Project Open/Project NOT Approved/Unknown Sender!"
     );
 
-    crowdFundingToken_.transferFrom(address(this), msg.sender, projects_[_projectId].balance);
+    crowdFundingToken_.approve(msg.sender, projects_[_projectId].balance);
 
     return true;
   }

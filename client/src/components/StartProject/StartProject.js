@@ -268,8 +268,8 @@ class StartProject extends Component {
 
     if (!description || ("" === description)) {
       errors.description = "Please write a description for your project.";
-    } else if ((description.length < 10) || (description.length > 300)) {
-      errors.description = "Project's description must have between 100 and 300 characters.";
+    } else if ((description.length < 10) || (description.length > 3000)) {
+      errors.description = "Project's description must have between 100 and 3000 characters.";
     }
 
     if (null === image) {
@@ -360,11 +360,13 @@ class StartProject extends Component {
                     (false === view.data.form.submitted) ?
                     <>
                       <Card.Title className="display-6 mb-3">
-                        Raise Funding
+                        <b>Raise Funding</b>
                       </Card.Title>
 
                       <Card.Text className="text-muted mb-3">
-                        Complete the following formular to be able to propose your crowd funding project into our platform.
+                        <i>
+                          Complete the following formular to be able to propose your crowd funding project into our platform.
+                        </i>
                       </Card.Text>
 
                       {

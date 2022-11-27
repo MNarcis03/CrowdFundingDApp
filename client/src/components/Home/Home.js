@@ -195,6 +195,10 @@ class Home extends Component {
                 project.category = decodedIpfsContent.category;
               }
 
+              if (decodedIpfsContent && decodedIpfsContent.imageUrl) {
+                project.imageUrl = decodedIpfsContent.imageUrl;
+              }
+
               projects.push(project);
             }
           } catch (err) {
@@ -223,17 +227,22 @@ class Home extends Component {
       for (let it = 0; it < projects.fetched.length; it++) {
         const card =
           <Col>
-            <Card className="text-center justify-content-md-center" style={{ width: "16rem", height: "12rem" }}>
-              <Card.Body className="mt-1 mb-2">
+            <Card className="text-center justify-content-md-center" style={{ width: "22rem", height: "24rem" }}>
+              <Card.Img
+                variant="top"
+                src={ projects.fetched[it].imageUrl }
+                style={{ width: "100%", height: "50%" }}
+              />
+              <Card.Body>
                 <Card.Title className="lead">
-                  { projects.fetched[it].name }
+                  <b>{ projects.fetched[it].name }</b>
                 </Card.Title>
 
                 <Card.Text className="text-muted mb-1">
-                  Created by { projects.fetched[it].owner }
+                  <i>Created by { projects.fetched[it].owner }</i>
                 </Card.Text>
 
-                <Card.Text className="text-muted mb-1">
+                <Card.Text className="lead mb-1">
                   { projects.fetched[it].category }
                 </Card.Text>
 
@@ -241,15 +250,15 @@ class Home extends Component {
                   {
                     //if
                     (true === projects.fetched[it].isOpen) ?
-                      <>
+                      <b>
                         {
                           Math.floor(
                             (projects.fetched[it].balance / token.decimals) * 100 /
                             (projects.fetched[it].goal / token.decimals))
                         }% Funded
-                      </>
+                      </b>
                     //else
-                    : "Funding Finished"
+                    : <b>Funding Finished</b>
                     //endif
                   }
                 </Card.Text>
@@ -267,7 +276,7 @@ class Home extends Component {
 
       if (cards.length > 0) {
         projectsView =
-          <Row className="justify-content-md-center" style={{ "margin-left": "5%", width: "100%" }}>
+          <Row className="justify-content-md-center" style={{ "margin-left": "2%", width: "100%" }}>
             { cards }
           </Row>
         ;
@@ -376,7 +385,7 @@ class Home extends Component {
     const { web3, accounts, contracts, token, userAccount, view } = this.state;
 
     return (
-      <Container fluid="md auto" className="Home" style={{ width: "100%", height: "80%" }}>
+      <Container fluid="md auto" className="Home" style={{ width: "100%", height: "85%" }}>
         <Card border="light" className="text-center" style={{ width: "100%", height: "100%" }}>
           <Card.Body className="mt-3 mb-3" style={{ width: "100%", height: "100%" }}>
             {
@@ -400,10 +409,6 @@ class Home extends Component {
                   (null !== contracts.crowdsale) && (null !== contracts.token)
                 ) ?
                   <>
-                    <Card.Title className="display-6 mb-5">
-                      Homepage
-                    </Card.Title>
-
                     <Card.Text className="lead">
                       <b>Crowd Funding Token ({ token.symbol })</b>
                     </Card.Text>
@@ -411,19 +416,19 @@ class Home extends Component {
                     <Row className="justify-context-md-center">
                       <Col>
                         <Card.Text className="lead">
-                          <b>1 { token.symbol } = { 1 / token.rate } ETH</b>
+                          <i>1 { token.symbol } = { 1 / token.rate } Kilowei</i>
                         </Card.Text>
                       </Col>
                       <Col>
                         <Card.Text className="lead">
-                          <b>
+                          <i>
                             { view.data.projects.totalFunding / token.decimals } { token.symbol } Total Funding
-                          </b>
+                          </i>
                         </Card.Text>
                       </Col>
                       <Col>
                         <Card.Text className="lead">
-                          <b>1 { token.balance / token.decimals } { token.symbol } Units Left For Sale</b>
+                          <i>1 { token.balance / token.decimals } { token.symbol } Units Left For Sale</i>
                         </Card.Text>
                       </Col>
                     </Row>
@@ -453,7 +458,7 @@ class Home extends Component {
 
                     <Link
                       to={{ pathname: `/discoverProjects` }}
-                      className="btn btn-outline-secondary mb-5"
+                      className="btn btn-outline-secondary fw-bold mb-5"
                       style={{ width: "100%" }}
                     >
                       SEE ALL PROJECTS

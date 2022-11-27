@@ -43,7 +43,7 @@ class DiscoverProjects extends Component {
             fetched: null,
             generated: null,
             pagination: {
-              ITEMS_PER_PAGE: 4,
+              ITEMS_PER_PAGE: 3,
               activePage: 1,
             },
           },
@@ -183,6 +183,10 @@ class DiscoverProjects extends Component {
               project.category = decodedIpfsContent.category;
             }
 
+            if (decodedIpfsContent && decodedIpfsContent.imageUrl) {
+              project.imageUrl = decodedIpfsContent.imageUrl;
+            }
+
             projects.push(project);
           }
         } catch (err) {
@@ -231,14 +235,19 @@ class DiscoverProjects extends Component {
       for (let it = start; it < end; it++) {
         const card =
           <Col>
-            <Card className="text-center justify-content-md-center" style={{ width: "14rem", height: "12rem" }}>
-              <Card.Body className="mt-1 mb-2">
+            <Card className="text-center justify-content-md-center" style={{ width: "22rem", height: "24rem" }}>
+              <Card.Img
+                variant="top"
+                src={ filteredProjects[it].imageUrl }
+                style={{ width: "100%", height: "50%" }}
+              />
+              <Card.Body>
                 <Card.Title className="lead">
-                  { filteredProjects[it].name }
+                  <b>{ filteredProjects[it].name }</b>
                 </Card.Title>
 
                 <Card.Text className="text-muted mb-1">
-                  Created by { filteredProjects[it].owner }
+                  <i>Created by { filteredProjects[it].owner }</i>
                 </Card.Text>
 
                 <Card.Text className="text-muted mb-1">
@@ -248,15 +257,15 @@ class DiscoverProjects extends Component {
                 <Card.Text className="text-muted mb-1">
                   {
                     //if
-                    (true === projects.fetched[it].open) ?
-                      <>
+                    (true === filteredProjects[it].open) ?
+                      <b>
                         {
                           Math.floor(
                             (filteredProjects[it].balance / token.decimals) * 100 /
                             (filteredProjects[it].goal / token.decimals)
                           )
                         }% Funded
-                      </>
+                      </b>
                     //else
                     : "Funding Finished"
                     //endif
@@ -298,7 +307,7 @@ class DiscoverProjects extends Component {
               //if
               (null !== paginationItems) ?
                 <Row>
-                  <Pagination size="sm" className="justify-content-md-center mt-5">
+                  <Pagination size="sm" className="justify-content-md-center mt-3">
                     { paginationItems }
                   </Pagination>
                 </Row>
@@ -428,7 +437,7 @@ class DiscoverProjects extends Component {
     const { web3, accounts, contracts, view } = this.state;
 
     return (
-      <Container fluid="md auto" className="DiscoverProjects" style={{ width: "100%", height: "70%" }}>
+      <Container fluid="md auto" className="DiscoverProjects" style={{ width: "100%", height: "85%" }}>
         {/* <Row className="justify-content-md-center" style={{ width: "100%", height: "100%" }}> */}
           <Card border="light" className="text-center" style={{ width: "100%", height: "100%" }}>
             <Card.Body className="mt-3 mb-3" style={{ width: "100%", height: "100%" }}>
@@ -454,16 +463,18 @@ class DiscoverProjects extends Component {
                   ) ?
                     <>
                       <Card.Title className="display-6 mb-3">
-                        Invest In Projects
+                        <b>Invest In Projects</b>
                       </Card.Title>
 
-                      <Card.Text className="text-muted mb-3">All Projects List</Card.Text>
+                      <Card.Text className="lead mb-3">All Projects List</Card.Text>
 
                       <hr/>
 
                       <Card.Text className="lead mb-5">
-                        Browse current investment opportunities on Crowd Funding DApp.
-                        All companies are vetted and they pass the approval process due diligence.
+                        <i>
+                          Browse current investment opportunities on Crowd Funding DApp.
+                          All companies are vetted and they pass the approval process due diligence.
+                        </i>
                       </Card.Text>
 
                       <Row className="justify-content-md-center mb-5">

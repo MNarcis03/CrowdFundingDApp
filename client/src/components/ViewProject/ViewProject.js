@@ -241,7 +241,7 @@ class ViewProject extends Component {
         if (_projectId < lastProjectId) {
           const isApproved = await crowdFunding.methods.isApproved(_projectId).call();
 
-          if (true === isApproved) {
+          if (true === isApproved || false === isApproved) {
             project.id = _projectId;
             project.isApproved = isApproved;
 
@@ -769,14 +769,28 @@ class ViewProject extends Component {
 
   close = async () => {
     try {
-      const { accounts, contracts } = this.state;
+      const { networkId, accounts, contracts, token } = this.state;
       let { view } = this.state;
+
+      const crowdFundingAddress =
+        CrowdFunding.networks[networkId] && CrowdFunding.networks[networkId].address;
 
       await contracts.crowdFunding.methods.close(
         view.data.project.fetched.id
       ).send({ from: accounts[0] });
 
-      
+      await contracts.crowdFunding.methods.distributeFunding(
+        view.data.project.fetched.id
+      ).send({ from: accounts[0] });
+
+      await contracts.token.methods.transferFrom(
+        crowdFundingAddress, accounts[0],
+        view.data.project.fetched.balance
+      ).send({ from: accounts[0] });
+
+      const accountBalance = await contracts.token.methods.balanceOf(accounts[0]).call();
+      token.accountBalance = new BigNumber(accountBalance);
+      this.setState({ token });
 
       view.data.project.fetched.isOpen = false;
       this.setState({ view });
@@ -884,14 +898,14 @@ class ViewProject extends Component {
                   (null !== view.data.project.fetched) ?
                     <>
                       <Card.Title className="display-6 mb-3">
-                        { view.data.project.fetched.name }
+                        <b>{ view.data.project.fetched.name }</b>
                       </Card.Title>
 
-                      <Card.Text className="text-muted mb-3">
-                        Created by { view.data.project.fetched.owner }
+                      <Card.Text className="mb-3">
+                        <i>Created by { view.data.project.fetched.owner }</i>
                       </Card.Text>
 
-                      <Card.Text className="text-muted mb-3">
+                      <Card.Text className="lead mb-3">
                         {
                           //if
                           (true === view.data.project.fetched.isOpen) ?
@@ -906,17 +920,17 @@ class ViewProject extends Component {
                       <Row className="justify-content-md-center mb-3">
                         <Col>
                           <Card.Text className="text-muted">
-                            Funding Goal: { view.data.project.fetched.goal / token.decimals } { token.symbol }
+                            <b>Funding Goal: { view.data.project.fetched.goal / token.decimals } { token.symbol }</b>
                           </Card.Text>
                         </Col>
                         <Col>
                           <Card.Text className="text-muted">
-                            Raised Capital: { view.data.project.fetched.balance / token.decimals } { token.symbol }
+                            <b>Raised Capital: { view.data.project.fetched.balance / token.decimals } { token.symbol }</b>
                           </Card.Text>
                         </Col>
                         <Col>
                           <Card.Text className="text-muted">
-                            { view.data.project.fetched.funders } Funders
+                            <b>{ view.data.project.fetched.funders } Funders</b>
                           </Card.Text>
                         </Col>
                       </Row>
@@ -925,7 +939,9 @@ class ViewProject extends Component {
                         //if
                         (view.data.project.fetched.funderBalance / token.decimals > 0) ?
                           <Card.Text className="text-muted mb-3">
-                            You Funded { view.data.project.fetched.name } With { view.data.project.fetched.funderBalance / token.decimals } { token.symbol }.
+                            <i>
+                              You Funded { view.data.project.fetched.name } With { view.data.project.fetched.funderBalance / token.decimals } { token.symbol }.
+                            </i>
                           </Card.Text>
                         //else
                         : <></>
@@ -1024,7 +1040,7 @@ class ViewProject extends Component {
                               style={{ width: "30%" }}
                             />
                             
-                            <Card.Text>
+                            <Card.Text className="lead">
                               { view.data.project.fetched.description }
                             </Card.Text>
                           </Row>

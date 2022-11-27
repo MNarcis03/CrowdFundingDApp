@@ -88,7 +88,7 @@ class Header extends Component {
 
       if (true === await this.userIsLoggedIn()) {
         const username = await this.getUsername(accounts[0]);
-        const isAdmin = this.userIsAdmin();
+        const isAdmin = this.userIsAdmin(username);
 
         this.setState({
           userAccount: {
@@ -168,8 +168,8 @@ class Header extends Component {
     }
   }
 
-  userIsAdmin() {
-    return true;
+  userIsAdmin(_username) {
+    return _username === "Admin";
   }
 
   render() {

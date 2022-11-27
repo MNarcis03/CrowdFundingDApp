@@ -392,7 +392,7 @@ class AdminControlCenter extends Component {
 
       listGroup.push(
         <Row className="justify-content-md-center">
-          <ListGroup as="ol" variant="flush" style={{ width: "70%" }}>
+          <ListGroup as="ol" variant="flush" style={{ width: "90%" }}>
             { listGroupItems }
           </ListGroup>
 
@@ -698,7 +698,7 @@ class AdminControlCenter extends Component {
                     :
                       <>
                         <Card.Title className="display-6 mb-5">
-                          Admin Control Panel
+                          <b>Admin Space</b>
                         </Card.Title>
 
                         <ButtonGroup className="mb-5" style={{ width: "20%" }}>

@@ -557,7 +557,7 @@ class MyAccount extends Component {
 
         listGroup.push(
           <Row className="justify-content-md-center mb-3">
-            <ListGroup as="ol" variant="flush" style={{ width: "70%" }}>
+            <ListGroup as="ol" variant="flush" style={{ width: "90%" }}>
               { listGroupItems }
             </ListGroup>
 
@@ -721,7 +721,7 @@ class MyAccount extends Component {
                     :
                       <>
                         <Card.Title className="display-6 mb-5">
-                          { userAccount.userProfile.username }'s Account
+                          <b>{ userAccount.userProfile.username }'s Account</b>
                         </Card.Title>
 
                         <ButtonGroup className="mb-5" style={{ width: "45%" }}>
@@ -744,7 +744,7 @@ class MyAccount extends Component {
                             style={{ width: "33%" }}
                             active={ view.active.createdProjects }
                           >
-                            Created Projects
+                            My Campaigns
                           </Button>
 
                           <Button
@@ -755,7 +755,7 @@ class MyAccount extends Component {
                             style={{ width: "33%" }}
                             active={ view.active.fundedProjects }
                           >
-                            Funded Projects
+                            Funding History
                           </Button>
                         </ButtonGroup>
 

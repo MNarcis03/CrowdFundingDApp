@@ -334,12 +334,12 @@ class Crowdsale extends Component {
 
   buyTokens = async () => {
     try {
-      const { accounts, networkId, contracts, token } = this.state;
+      const { accounts, networkId, contracts, token, view } = this.state;
 
-      const tokenPrice = this.getTokenPrice();
+      const value = this.getTokenPrice();
 
       await contracts.crowdsale.methods.buyTokens(accounts[0]).send({
-        value: tokenPrice, from: accounts[0]
+        value, from: accounts[0]
       });
 
       const balance = await contracts.token.methods.balanceOf(
@@ -418,8 +418,21 @@ class Crowdsale extends Component {
                   (true === userAccount.isLoggedIn) ?
                     <>
                       <Card.Title className="display-6 mb-5">
-                        { userAccount.username }'s Wallet
+                        <b>{ userAccount.username }'s Wallet</b>
                       </Card.Title>
+
+                      <Row className="justify-context-md-center">
+                        <Col>
+                          <Card.Text className="lead">
+                            <i>{ token.symbol } = CrowdFunding Token</i>
+                          </Card.Text>
+                        </Col>
+                        <Col>
+                          <Card.Text className="lead">
+                            <i>1 { token.symbol } = { 1 / token.rate } Kilowei</i>
+                          </Card.Text>
+                        </Col>
+                      </Row>
 
                       <ButtonGroup className="mb-5" style={{ width: "20%" }}>
                         <Button
@@ -450,11 +463,11 @@ class Crowdsale extends Component {
                         (true === view.active.myWallet) ?
                           <>
                             <Card.Text className="lead">
-                              Account Balance: { token.accountBalance / token.decimals } { token.symbol }
+                              <b>Account Balance:</b> <i>{ token.accountBalance / token.decimals } { token.symbol }</i>
                             </Card.Text>
 
                             <Card.Text className="lead">
-                              Account Address: { accounts[0] }
+                              <b>Account Address:</b> <i>{ accounts[0] }</i>
                             </Card.Text>
                           </>
                         //else
@@ -510,7 +523,11 @@ class Crowdsale extends Component {
                                         min="0"
                                       />
 
-                                      <InputGroup.Text>{ token.balance / token.decimals } { token.symbol } Left For Sale!</InputGroup.Text>
+                                      <InputGroup.Text>
+                                        <i>
+                                          { token.balance / token.decimals } { token.symbol } Left For Sale!
+                                        </i>
+                                      </InputGroup.Text>
 
                                       {
                                         //if
@@ -533,8 +550,8 @@ class Crowdsale extends Component {
                                       </Spinner>
                                     //else
                                     :
-                                      <Button variant="outline-secondary" type="submit" className="mt-3">
-                                        Pay { this.getTokenPrice() / token.decimals } ETH
+                                      <Button variant="outline-secondary" type="submit" className="mt-3 fw-bold" style={{ width: "10rem", height: "2.5rem" }}>
+                                        PAY { this.getTokenPrice() / token.decimals } Kilowei
                                       </Button>
                                     //endif
                                   }

@@ -1511,12 +1511,12 @@
         }
       },
       "links": {},
-      "address": "0x781CDFEcD390DF4779DB55F8951cbF0b22C2A7C1",
-      "transactionHash": "0x493ec990f5a1195e84f87a9400e6dabc7d023ce8628792e4736f877297d71aa9"
+      "address": "0x00B55BF86A6f431750c259f2DE3E0C125426A6bD",
+      "transactionHash": "0x4a9e0513749e21f58f7c6427dcdcbf226408cf61530962ed87e04aa0510da2da"
     }
   },
   "schemaVersion": "3.4.0",
-  "updatedAt": "2022-06-08T08:39:07.109Z",
+  "updatedAt": "2022-06-29T10:54:48.413Z",
   "networkType": "ethereum",
   "devdoc": {
     "methods": {
